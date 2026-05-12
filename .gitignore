@@ -1,0 +1,39 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+mcp-server/build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+
+# Database backups
+*.sql
+*.db
+
+# Playwright cache
+.playwright/
+
+# Don't commit credentials
+*_credentials.json
+*_token.json

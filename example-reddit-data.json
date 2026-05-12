@@ -1,0 +1,124 @@
+{
+  "niche": "exotic_car_rental",
+  "source": "reddit",
+  "scrapeDate": "2026-01-15",
+  "totalPosts": 10,
+  "posts": [
+    {
+      "id": "1abc123",
+      "subreddit": "r/entrepreneur",
+      "title": "I built a $180k/year exotic car rental side business (AMA)",
+      "body": "Started 2 years ago with one leased Corvette. Now I have 4 cars (Corvette, Mustang GT, Camaro ZL1, Challenger). List them on Turo and do local Instagram marketing. Average $15k/month revenue, $8k profit after car payments and insurance. The $2k security deposit was the biggest barrier at first - lost so many bookings because of it. Eventually started offering payment plans for verified customers. Insurance is still my biggest headache - spent weeks calling different providers to find one that covers exotic rentals. AMA!",
+      "url": "https://reddit.com/r/entrepreneur/comments/1abc123",
+      "author": "u/exoticcarpreneur",
+      "upvotes": 347,
+      "comments": 89,
+      "timestamp": "2026-01-10T14:30:00Z"
+    },
+    {
+      "id": "2def456",
+      "subreddit": "r/smallbusiness",
+      "title": "Anyone else struggling with exotic car insurance costs?",
+      "body": "Paying $4200/year to insure my Lamborghini rental. Called 12 different providers before finding one that even covers exotic rentals commercially. Most hang up when I say 'rental business.' The ones that do cover it want 20% down plus ridiculous premiums. Is there a better way to do this? Feels like I'm getting robbed.",
+      "url": "https://reddit.com/r/smallbusiness/comments/2def456",
+      "author": "u/lamboowner",
+      "upvotes": 56,
+      "comments": 34,
+      "timestamp": "2026-01-08T09:15:00Z"
+    },
+    {
+      "id": "3ghi789",
+      "subreddit": "r/exoticcars",
+      "title": "Rented a McLaren for my wedding - worth every penny",
+      "body": "Just married last weekend. Rented a McLaren 720S for the day - $1400 total. The $2000 deposit scared me at first but I got it all back. Driver's experience photos are INCREDIBLE. All my groomsmen want to do it for their weddings now. Only complaint: they didn't explain insurance coverage clearly - I paid extra for their insurance but still don't know what it actually covers.",
+      "url": "https://reddit.com/r/exoticcars/comments/3ghi789",
+      "author": "u/justmarried2026",
+      "upvotes": 234,
+      "comments": 67,
+      "timestamp": "2026-01-12T18:45:00Z"
+    },
+    {
+      "id": "4jkl012",
+      "subreddit": "r/entrepreneur",
+      "title": "Should I start an exotic car rental business? Market research inside",
+      "body": "Thinking about buying 2-3 exotic cars and renting them out on Turo. Did some research:\n\n- Average rental: $800-1500/day\n- Occupancy rate: ~60% if marketed well\n- Insurance: $3k-5k/year per car\n- Maintenance: $200-500/month per car\n\nBiggest concerns:\n1. That $2k security deposit - will it scare people away?\n2. Damage liability - what if someone totals it?\n3. Insurance complexity - seems like a nightmare\n\nAnyone done this before? Is it worth it?",
+      "url": "https://reddit.com/r/entrepreneur/comments/4jkl012",
+      "author": "u/potentialowner",
+      "upvotes": 123,
+      "comments": 78,
+      "timestamp": "2026-01-14T11:20:00Z"
+    },
+    {
+      "id": "5mno345",
+      "subreddit": "r/personalfinance",
+      "title": "Rented an exotic car for a weekend - hidden fees?",
+      "body": "Booked a Ferrari for my 30th birthday. Listed at $999/day. By checkout it was $1,450/day after:\n\n- Insurance: $150/day (mandatory)\n- Cleaning fee: $100\n- 'Premium location' fee: $50/day\n- Taxes: $151\n\nIs this normal? Feels like bait-and-switch. The insurance part especially - they didn't explain what's covered vs not covered. Just said 'you need this.' I paid it because I didn't want to risk totaling a $300k car but still feels sketchy.",
+      "url": "https://reddit.com/r/personalfinance/comments/5mno345",
+      "author": "u/ferrari30th",
+      "upvotes": 445,
+      "comments": 234,
+      "timestamp": "2026-01-06T16:00:00Z"
+    },
+    {
+      "id": "6pqr678",
+      "subreddit": "r/entrepreneur",
+      "title": "Exotic car rental arbitrage - is this a thing?",
+      "body": "Saw someone on Instagram claiming they make $40k/month renting exotic cars they don't own. Model is:\n\n1. Lease exotic car ($2k-3k/month)\n2. Rent it out 15-20 days/month at $1k/day\n3. Profit $12k-17k/month per car\n\nSeems too good to be true. What am I missing? Insurance? Damage costs? Market saturation?\n\nAlso: how do they deal with the insurance question? Every rental platform requires commercial insurance and it's insanely expensive.",
+      "url": "https://reddit.com/r/entrepreneur/comments/6pqr678",
+      "author": "u/arbitrageking",
+      "upvotes": 89,
+      "comments": 56,
+      "timestamp": "2026-01-11T13:30:00Z"
+    },
+    {
+      "id": "7stu901",
+      "subreddit": "r/smallbusiness",
+      "title": "Corporate exotic car rentals - untapped market?",
+      "body": "I run a small event planning company. Clients ask about exotic car rentals for:\n\n- Executive photoshoots\n- Trade show displays\n- Client entertainment\n- Product launches\n\nBut I can never find rental companies that do B2B. Everything's targeted at weekend warriors. Anyone know companies that handle corporate rentals? Or is this an opportunity to start one?\n\nBudgets are $5k-15k per event. Way more than consumer rentals. But zero companies market to this segment.",
+      "url": "https://reddit.com/r/smallbusiness/comments/7stu901",
+      "author": "u/eventplanner_nyc",
+      "upvotes": 167,
+      "comments": 45,
+      "timestamp": "2026-01-09T10:00:00Z"
+    },
+    {
+      "id": "8vwx234",
+      "subreddit": "r/exoticcars",
+      "title": "Turo vs Enterprise Exotic Collection - which is better?",
+      "body": "Want to rent a Lamborghini for a week in Miami. Found options on:\n\n**Turo:**\n- $1200/day\n- $2000 deposit\n- Insurance unclear\n- Owner seems sketchy (2 reviews)\n\n**Enterprise Exotic:**\n- $1800/day\n- $500 deposit\n- Full insurance included\n- Professional but expensive\n\nIs the Enterprise premium worth it? Or are Turo owners generally reliable? The insurance thing worries me - Turo's 'protection plan' doesn't seem comprehensive.",
+      "url": "https://reddit.com/r/exoticcars/comments/8vwx234",
+      "author": "u/miamiweekend",
+      "upvotes": 78,
+      "comments": 34,
+      "timestamp": "2026-01-13T15:45:00Z"
+    },
+    {
+      "id": "9yz123a",
+      "subreddit": "r/entrepreneur",
+      "title": "My exotic car rental business failed - lessons learned",
+      "body": "Shut down my exotic car rental business after 18 months. Lessons:\n\n1. **Insurance killed me** - $6k/year per car, took 3 months to find a provider\n2. **Deposits scare customers** - Lost 60% of inquiries because of $2k deposit\n3. **Damage disputes** - 3 customers disputed damage charges, cost me $8k in legal fees\n4. **Seasonal** - May-August was great, October-March dead\n5. **Marketing costs** - Instagram ads were $2k/month just to get inquiries\n\nIf I did it again:\n- Partner with insurance company upfront\n- Lower deposit, raise daily rate\n- Focus on corporate clients (higher budgets, less drama)\n\nHappy to answer questions.",
+      "url": "https://reddit.com/r/entrepreneur/comments/9yz123a",
+      "author": "u/failedexoticrentals",
+      "upvotes": 567,
+      "comments": 189,
+      "timestamp": "2026-01-07T12:00:00Z"
+    },
+    {
+      "id": "0abc456b",
+      "subreddit": "r/exoticcars",
+      "title": "First time renting exotic car - what should I know?",
+      "body": "Turning 25 next month. Want to rent a Porsche 911 for the weekend to celebrate. Never done this before.\n\nQuestions:\n1. What's a reasonable price? Seeing $600-1200/day\n2. Is the deposit refundable if I don't damage anything?\n3. Do I need special insurance or does my regular auto insurance cover it?\n4. Any hidden fees I should watch out for?\n5. Turo vs traditional rental company?\n\nI just want to drive it for Instagram and feel cool for a weekend. Not trying to get scammed.",
+      "url": "https://reddit.com/r/exoticcars/comments/0abc456b",
+      "author": "u/turning25soon",
+      "upvotes": 34,
+      "comments": 28,
+      "timestamp": "2026-01-15T09:30:00Z"
+    }
+  ],
+  "metadata": {
+    "keywordsUsed": ["exotic car rental", "supercar rental", "Lamborghini rental", "luxury car business"],
+    "subredditsTargeted": ["r/entrepreneur", "r/smallbusiness", "r/exoticcars", "r/personalfinance"],
+    "dateRange": "2026-01-06 to 2026-01-15",
+    "totalCommentsAnalyzed": 854
+  }
+}

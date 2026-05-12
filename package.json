@@ -1,0 +1,22 @@
+{
+  "name": "niche-intelligence",
+  "version": "1.0.0",
+  "description": "Multi-brain AI market intelligence platform",
+  "main": "index.js",
+  "scripts": {
+    "migrate": "tsx migrate.ts",
+    "test-db": "tsx test-db.ts",
+    "seed": "tsx seed-exotic-car-niche.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.30.10",
+    "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.5"
+  }
+}
