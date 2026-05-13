@@ -13,15 +13,6 @@ import { Pool } from 'pg';
 
 const pool = new Pool({ connectionString: process.env.NEON_DB_URL });
 
-/*
- * Research Expansion Pattern:
- * 1. Claude Desktop calls expand_research with identified gaps
- * 2. Tool returns search queries
- * 3. Claude Desktop executes web_search for each
- * 4. Claude Desktop saves results to raw_source_data
- * 5. Claude Desktop generates personas with enriched data
- */
-
 // ─── Tool Definitions ──────────────────────────────────────────────────────────
 
 const TOOLS = [
@@ -169,6 +160,53 @@ const TOOLS = [
         },
       },
       required: ['niche_id', 'gaps'],
+    },
+  },
+  {
+    name: 'save_success_story',
+    description: 'Save a money-making success story to the database. Stories must have credibility score 0.5+ to be saved.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        story_title: { type: 'string', description: 'Compelling headline summarizing the story' },
+        summary: { type: 'string', description: 'Brief summary of the success story' },
+        revenue: {
+          type: 'object',
+          description: 'Financial metrics',
+          properties: {
+            amount: { type: 'number', description: 'Revenue amount in dollars' },
+            timeframe: { type: 'string', description: 'e.g. "monthly", "yearly", "6 months"' },
+            proof_type: { type: 'string', description: '"screenshot", "stated", "inferred"' },
+          },
+        },
+        method: { type: 'string', description: 'What they did to make money (detailed)' },
+        platform: { type: 'string', description: 'e.g. "turo", "rental_business", "marketplace"' },
+        credibility_score: { type: 'number', description: 'Score 0.0-1.0 based on evidence quality' },
+        proof_links: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'URLs to proof (screenshots, dashboard, etc.)',
+        },
+        source_url: { type: 'string', description: 'URL of original post/source' },
+        source_type: { type: 'string', description: '"reddit", "youtube", "blog", etc.' },
+      },
+      required: ['niche_id', 'story_title', 'summary', 'method', 'credibility_score', 'source_url'],
+    },
+  },
+  {
+    name: 'query_success_stories',
+    description: 'Fetch money-making success stories for a niche, ordered by credibility score.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        min_credibility: {
+          type: 'number',
+          description: 'Minimum credibility score (0.0-1.0). Default: 0.5',
+        },
+      },
+      required: ['niche_id'],
     },
   },
 ];
@@ -340,10 +378,56 @@ async function queryPersonas(a: Args) {
   return rows;
 }
 
+async function saveSuccessStory(a: Args) {
+  const credibility = Math.min(Math.max(Number((a.credibility_score as number).toFixed(2)), 0), 1);
+  
+  if (credibility < 0.5) {
+    throw new Error('Credibility score must be ≥ 0.5 to save a success story');
+  }
+
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO success_stories
+       (niche_id, story_title, summary, revenue, method, platform,
+        credibility_score, proof_links, source_url, source_type)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING id, discovered_at`,
+    [
+      a.niche_id,
+      a.story_title,
+      a.summary,
+      toJson(a.revenue),
+      a.method,
+      (a.platform as string | undefined) ?? null,
+      credibility,
+      toJson(a.proof_links),
+      a.source_url,
+      (a.source_type as string | undefined) ?? null,
+    ]
+  );
+  return { success: true, story_id: rows[0].id, discovered_at: rows[0].discovered_at };
+}
+
+async function querySuccessStories(a: Args) {
+  const niche_id = a.niche_id as number;
+  const min_credibility = (a.min_credibility as number | undefined) ?? 0.5;
+
+  const { rows } = await pool.query(
+    `SELECT id, niche_id, story_title, summary, revenue, method, platform,
+            credibility_score, proof_links, source_url, source_type, discovered_at
+     FROM success_stories
+     WHERE niche_id = $1 AND credibility_score >= $2
+     ORDER BY credibility_score DESC, discovered_at DESC`,
+    [niche_id, min_credibility]
+  );
+  return rows;
+}
+
 // ─── MCP Server ────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'niche-intelligence', version: '0.3.0' },
+  { name: 'niche-intelligence', version: '0.4.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -356,13 +440,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     let result: unknown;
     switch (name) {
-      case 'query_raw_posts':  result = await queryRawPosts(a);  break;
-      case 'query_insights':   result = await queryInsights(a);  break;
-      case 'save_insight':     result = await saveInsight(a);    break;
-      case 'save_persona':     result = await savePersona(a);    break;
-      case 'get_niche_config': result = await getNicheConfig(a); break;
-      case 'query_personas':    result = await queryPersonas(a);    break;
-      case 'expand_research':   result = await expandResearch(a);   break;
+      case 'query_raw_posts':      result = await queryRawPosts(a);      break;
+      case 'query_insights':       result = await queryInsights(a);      break;
+      case 'save_insight':         result = await saveInsight(a);        break;
+      case 'save_persona':         result = await savePersona(a);        break;
+      case 'get_niche_config':     result = await getNicheConfig(a);     break;
+      case 'query_personas':       result = await queryPersonas(a);      break;
+      case 'expand_research':      result = await expandResearch(a);     break;
+      case 'save_success_story':   result = await saveSuccessStory(a);   break;
+      case 'query_success_stories': result = await querySuccessStories(a); break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],
@@ -380,4 +466,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('Niche Intelligence MCP v0.3.0 — data access + research expansion');
+console.error('Niche Intelligence MCP v0.4.0 — success stories + full data access');
