@@ -258,6 +258,24 @@ const TOOLS = [
       required: ['niche_id', 'offer_name', 'problem_solved', 'unique_value'],
     },
   },
+  {
+    name: 'save_financial_analysis',
+    description: 'Save financial analysis (TAM, CAC, LTV, unit economics) to validate market opportunities.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        tam_estimate: { type: 'string', description: 'Total addressable market estimate with methodology' },
+        average_cac: { type: 'string', description: 'Customer acquisition cost with data sources' },
+        average_ltv: { type: 'string', description: 'Lifetime value calculation' },
+        ltv_cac_ratio: { type: 'string', description: 'LTV:CAC ratio (healthy = 3:1+)' },
+        payback_period: { type: 'string', description: 'Time to recover CAC' },
+        churn_rate: { type: 'string', description: 'Customer churn rate' },
+        unit_economics: { type: 'object', description: 'Revenue, costs, margins per customer' },
+      },
+      required: ['niche_id', 'tam_estimate'],
+    },
+  },
 ];
 
 // ─── Handlers ──────────────────────────────────────────────────────────────────
@@ -532,10 +550,33 @@ async function saveOffer(a: Args) {
   return { success: true, offer_id: rows[0].id, generated_at: rows[0].generated_at };
 }
 
+async function saveFinancialAnalysis(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO financial_analysis
+       (niche_id, tam_estimate, average_cac, average_ltv, ltv_cac_ratio,
+        payback_period, churn_rate, unit_economics, analyzed_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+     RETURNING id, analyzed_at`,
+    [
+      a.niche_id,
+      a.tam_estimate,
+      (a.average_cac as string | undefined) ?? null,
+      (a.average_ltv as string | undefined) ?? null,
+      (a.ltv_cac_ratio as string | undefined) ?? null,
+      (a.payback_period as string | undefined) ?? null,
+      (a.churn_rate as string | undefined) ?? null,
+      toJson(a.unit_economics),
+    ]
+  );
+  return { success: true, analysis_id: rows[0].id, analyzed_at: rows[0].analyzed_at };
+}
+
 // ─── MCP Server ────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'niche-intelligence', version: '0.5.3' },
+  { name: 'niche-intelligence', version: '0.5.4' },
   { capabilities: { tools: {} } }
 );
 
@@ -560,6 +601,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'generate_disruption_report': result = await generateDisruptionReport(a); break;
       case 'save_marketing_copy':        result = await saveMarketingCopy(a);        break;
       case 'save_offer':                 result = await saveOffer(a);                break;
+      case 'save_financial_analysis':    result = await saveFinancialAnalysis(a);    break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],
@@ -577,4 +619,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('Niche Intelligence MCP v0.5.3 — offer designer brain + pricing strategy');
+console.error('Niche Intelligence MCP v0.5.4 — financial analyst brain + TAM/CAC/LTV validation');
