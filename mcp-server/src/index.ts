@@ -276,6 +276,24 @@ const TOOLS = [
       required: ['niche_id', 'tam_estimate'],
     },
   },
+  {
+    name: 'save_competitor_analysis',
+    description: 'Save competitive analysis identifying strengths, weaknesses, and opportunities.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        competitor_name: { type: 'string' },
+        positioning: { type: 'string', description: 'How they position themselves' },
+        strengths: { type: 'array', items: { type: 'string' } },
+        weaknesses: { type: 'array', items: { type: 'string' } },
+        gaps_and_opportunities: { type: 'array', items: { type: 'string' } },
+        market_share_estimate: { type: 'string', description: 'Estimated market share' },
+        strategy: { type: 'string', description: 'Their go-to-market strategy' },
+      },
+      required: ['niche_id', 'competitor_name'],
+    },
+  },
 ];
 
 // ─── Handlers ──────────────────────────────────────────────────────────────────
@@ -573,10 +591,33 @@ async function saveFinancialAnalysis(a: Args) {
   return { success: true, analysis_id: rows[0].id, analyzed_at: rows[0].analyzed_at };
 }
 
+async function saveCompetitorAnalysis(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO competitor_analysis
+       (niche_id, competitor_name, positioning, strengths, weaknesses,
+        gaps_and_opportunities, market_share_estimate, strategy, analyzed_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+     RETURNING id, analyzed_at`,
+    [
+      a.niche_id,
+      a.competitor_name,
+      (a.positioning as string | undefined) ?? null,
+      toJson(a.strengths),
+      toJson(a.weaknesses),
+      toJson(a.gaps_and_opportunities),
+      (a.market_share_estimate as string | undefined) ?? null,
+      (a.strategy as string | undefined) ?? null,
+    ]
+  );
+  return { success: true, analysis_id: rows[0].id, analyzed_at: rows[0].analyzed_at };
+}
+
 // ─── MCP Server ────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'niche-intelligence', version: '0.5.4' },
+  { name: 'niche-intelligence', version: '0.5.5' },
   { capabilities: { tools: {} } }
 );
 
@@ -602,6 +643,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'save_marketing_copy':        result = await saveMarketingCopy(a);        break;
       case 'save_offer':                 result = await saveOffer(a);                break;
       case 'save_financial_analysis':    result = await saveFinancialAnalysis(a);    break;
+      case 'save_competitor_analysis':   result = await saveCompetitorAnalysis(a);   break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],
@@ -619,4 +661,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('Niche Intelligence MCP v0.5.4 — financial analyst brain + TAM/CAC/LTV validation');
+console.error('Niche Intelligence MCP v0.5.5 — competitive intelligence brain + competitor analysis');
