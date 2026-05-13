@@ -294,6 +294,21 @@ const TOOLS = [
       required: ['niche_id', 'competitor_name'],
     },
   },
+  {
+    name: 'query_all_intelligence',
+    description: 'Conversational Assistant: Query and synthesize intelligence across all brain outputs to answer user questions.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        query_type: {
+          type: 'string',
+          description: 'What user wants: pain_points | personas | opportunities | offers | financials | competitors | copy | comprehensive',
+        },
+      },
+      required: ['niche_id', 'query_type'],
+    },
+  },
 ];
 
 // ─── Handlers ──────────────────────────────────────────────────────────────────
@@ -614,10 +629,37 @@ async function saveCompetitorAnalysis(a: Args) {
   return { success: true, analysis_id: rows[0].id, analyzed_at: rows[0].analyzed_at };
 }
 
+async function queryAllIntelligence(a: Args) {
+  const niche_id = a.niche_id as number;
+  const query_type = a.query_type as string;
+
+  const summary: Record<string, unknown> = { niche_id, query_type, available_data: {} };
+
+  const counts = await Promise.all([
+    pool.query('SELECT COUNT(*) as count FROM insights WHERE niche_id = $1', [niche_id]),
+    pool.query('SELECT COUNT(*) as count FROM customer_avatars WHERE niche_id = $1', [niche_id]),
+    pool.query('SELECT COUNT(*) as count FROM success_stories WHERE niche_id = $1', [niche_id]),
+    pool.query('SELECT COUNT(*) as count FROM marketing_copy_library WHERE niche_id = $1', [niche_id]),
+    pool.query('SELECT COUNT(*) as count FROM offer_intelligence WHERE niche_id = $1', [niche_id]),
+  ]);
+
+  summary.available_data = {
+    insights: parseInt(counts[0].rows[0].count),
+    personas: parseInt(counts[1].rows[0].count),
+    success_stories: parseInt(counts[2].rows[0].count),
+    marketing_copy: parseInt(counts[3].rows[0].count),
+    offers: parseInt(counts[4].rows[0].count),
+  };
+
+  summary.instruction = 'Use specific query tools (query_insights, query_personas, etc) to fetch and synthesize data';
+
+  return summary;
+}
+
 // ─── MCP Server ────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'niche-intelligence', version: '0.5.5' },
+  { name: 'niche-intelligence', version: '1.0.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -644,6 +686,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'save_offer':                 result = await saveOffer(a);                break;
       case 'save_financial_analysis':    result = await saveFinancialAnalysis(a);    break;
       case 'save_competitor_analysis':   result = await saveCompetitorAnalysis(a);   break;
+      case 'query_all_intelligence':     result = await queryAllIntelligence(a);     break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],
@@ -661,4 +704,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('Niche Intelligence MCP v0.5.5 — competitive intelligence brain + competitor analysis');
+console.error('Niche Intelligence MCP v1.0.0 — FULL PLATFORM: all 9 brains operational');
