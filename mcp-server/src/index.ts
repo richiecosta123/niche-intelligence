@@ -221,6 +221,24 @@ const TOOLS = [
       required: ['niche_id'],
     },
   },
+  {
+    name: 'save_marketing_copy',
+    description: 'Save marketing copy asset (headline, CTA, email subject, body copy) to the marketing_copy_library table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        copy_type: { type: 'string', description: 'headline | cta | email_subject | body_copy' },
+        copy_text: { type: 'string' },
+        use_case: { type: 'string', description: 'landing_page | email | ad | social' },
+        source_type: { type: 'string' },
+        avatar_target: { type: 'string' },
+        emotional_trigger: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['niche_id', 'copy_type', 'copy_text'],
+    },
+  },
 ];
 
 // ─── Handlers ──────────────────────────────────────────────────────────────────
@@ -448,10 +466,33 @@ async function generateDisruptionReport(a: Args) {
   };
 }
 
+async function saveMarketingCopy(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO marketing_copy_library
+       (niche_id, copy_type, copy_text, use_case, source_type,
+        avatar_target, emotional_trigger, tags)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING id, created_at`,
+    [
+      a.niche_id,
+      a.copy_type,
+      a.copy_text,
+      (a.use_case as string | undefined) ?? null,
+      (a.source_type as string | undefined) ?? null,
+      (a.avatar_target as string | undefined) ?? null,
+      (a.emotional_trigger as string | undefined) ?? null,
+      toJson(a.tags),
+    ]
+  );
+  return { success: true, copy_id: rows[0].id, created_at: rows[0].created_at };
+}
+
 // ─── MCP Server ────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'niche-intelligence', version: '0.4.0' },
+  { name: 'niche-intelligence', version: '0.5.2' },
   { capabilities: { tools: {} } }
 );
 
@@ -474,6 +515,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'save_success_story':   result = await saveSuccessStory(a);   break;
       case 'query_success_stories': result = await querySuccessStories(a); break;
       case 'generate_disruption_report': result = await generateDisruptionReport(a); break;
+      case 'save_marketing_copy':        result = await saveMarketingCopy(a);        break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],
@@ -491,4 +533,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('Niche Intelligence MCP v0.4.0 — success stories + full data access');
+console.error('Niche Intelligence MCP v0.5.2 — copywriter brain + marketing copy library');
