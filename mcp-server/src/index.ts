@@ -239,6 +239,25 @@ const TOOLS = [
       required: ['niche_id', 'copy_type', 'copy_text'],
     },
   },
+  {
+    name: 'save_offer',
+    description: 'Save a positioned offer design with pricing strategy to the offer_intelligence table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        offer_name: { type: 'string' },
+        offer_type: { type: 'string', description: 'service | product | saas | marketplace' },
+        target_avatar: { type: 'string' },
+        problem_solved: { type: 'string' },
+        unique_value: { type: 'string' },
+        pricing: { type: 'object', description: 'Pricing strategy with rationale' },
+        market_timing: { type: 'object', description: 'Urgency factors and seasonality' },
+        anticipated_objections: { type: 'array', items: { type: 'object' } },
+      },
+      required: ['niche_id', 'offer_name', 'problem_solved', 'unique_value'],
+    },
+  },
 ];
 
 // ─── Handlers ──────────────────────────────────────────────────────────────────
@@ -489,10 +508,34 @@ async function saveMarketingCopy(a: Args) {
   return { success: true, copy_id: rows[0].id, created_at: rows[0].created_at };
 }
 
+async function saveOffer(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO offer_intelligence
+       (niche_id, offer_name, offer_type, target_avatar, problem_solved,
+        unique_value, pricing, market_timing, anticipated_objections)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     RETURNING id, generated_at`,
+    [
+      a.niche_id,
+      a.offer_name,
+      (a.offer_type as string | undefined) ?? null,
+      (a.target_avatar as string | undefined) ?? null,
+      a.problem_solved,
+      a.unique_value,
+      toJson(a.pricing),
+      toJson(a.market_timing),
+      toJson(a.anticipated_objections),
+    ]
+  );
+  return { success: true, offer_id: rows[0].id, generated_at: rows[0].generated_at };
+}
+
 // ─── MCP Server ────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'niche-intelligence', version: '0.5.2' },
+  { name: 'niche-intelligence', version: '0.5.3' },
   { capabilities: { tools: {} } }
 );
 
@@ -516,6 +559,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'query_success_stories': result = await querySuccessStories(a); break;
       case 'generate_disruption_report': result = await generateDisruptionReport(a); break;
       case 'save_marketing_copy':        result = await saveMarketingCopy(a);        break;
+      case 'save_offer':                 result = await saveOffer(a);                break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],
@@ -533,4 +577,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('Niche Intelligence MCP v0.5.2 — copywriter brain + marketing copy library');
+console.error('Niche Intelligence MCP v0.5.3 — offer designer brain + pricing strategy');
