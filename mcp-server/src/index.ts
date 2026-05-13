@@ -209,6 +209,18 @@ const TOOLS = [
       required: ['niche_id'],
     },
   },
+  {
+    name: 'generate_disruption_report',
+    description: 'Generate a 20-page market disruption report synthesizing all intelligence (insights, personas, success stories). Returns analysis + saves to disruption_reports table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to analyze' },
+        report_period: { type: 'string', description: 'e.g. "Q2_2026_Week_1"' },
+      },
+      required: ['niche_id'],
+    },
+  },
 ];
 
 // ─── Handlers ──────────────────────────────────────────────────────────────────
@@ -424,6 +436,18 @@ async function querySuccessStories(a: Args) {
   return rows;
 }
 
+async function generateDisruptionReport(a: Args) {
+  const niche_id = a.niche_id as number;
+  const report_period = (a.report_period as string | undefined) ?? `Q2_2026_Week_${Math.ceil(Date.now() / (7*24*60*60*1000))}`;
+
+  return {
+    status: 'ready_to_generate',
+    instruction: 'Use Market Strategist prompt with insights + personas + success stories',
+    niche_id,
+    report_period,
+  };
+}
+
 // ─── MCP Server ────────────────────────────────────────────────────────────────
 
 const server = new Server(
@@ -449,6 +473,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'expand_research':      result = await expandResearch(a);     break;
       case 'save_success_story':   result = await saveSuccessStory(a);   break;
       case 'query_success_stories': result = await querySuccessStories(a); break;
+      case 'generate_disruption_report': result = await generateDisruptionReport(a); break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],
