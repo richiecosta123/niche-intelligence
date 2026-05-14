@@ -1,0 +1,67 @@
+{
+  "niche": "chauffeur-services",
+  "nicheId": 3,
+  "status": "active",
+  "dataSources": {
+    "reddit": {
+      "subreddits": [
+        "r/entrepreneur",
+        "r/smallbusiness",
+        "r/Entrepreneurship",
+        "r/startups",
+        "r/luxurylife"
+      ],
+      "keywords": [
+        "chauffeur service",
+        "car service business",
+        "executive transport",
+        "luxury car service",
+        "corporate transportation",
+        "black car service",
+        "limousine service",
+        "black car startup"
+      ]
+    },
+    "youtube": {
+      "searchKeywords": [
+        "chauffeur service business",
+        "black car service startup",
+        "executive transportation business",
+        "limousine service review",
+        "how to start chauffeur business"
+      ]
+    },
+    "googleTrends": {
+      "terms": [
+        "chauffeur service",
+        "black car service",
+        "executive car service",
+        "corporate transportation",
+        "luxury car service near me",
+        "hire a chauffeur"
+      ],
+      "geo": "US",
+      "timeframe": "today 12-m"
+    }
+  },
+  "competitors": [
+    "Blacklane",
+    "Carey International",
+    "GroundLink",
+    "Uber Black",
+    "Lyft Lux",
+    "SuperShuttle"
+  ],
+  "researchFrequency": {
+    "daily": ["trend_data", "raw_source_data"],
+    "weekly": ["insights", "opportunities", "customer_avatars"],
+    "monthly": ["disruption_reports", "quarterly_industry_reports"]
+  },
+  "marketMetadata": {
+    "avgTripPriceUsd": 150,
+    "primarySegments": ["corporate", "airport_transfers", "special_events", "roadshows"],
+    "primaryMarkets": ["New York", "Los Angeles", "Chicago", "San Francisco", "London"],
+    "marketSizeUsdBillions": 6.8,
+    "yoyGrowthPercent": 7.2
+  }
+}

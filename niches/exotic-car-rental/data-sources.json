@@ -1,0 +1,79 @@
+{
+  "niche": "exotic-car-rental",
+  "nicheId": 1,
+  "status": "active",
+  "dataSources": {
+    "reddit": {
+      "subreddits": [
+        "r/exoticcars",
+        "r/luxurycars",
+        "r/carporn",
+        "r/supercars",
+        "r/Entrepreneur",
+        "r/smallbusiness",
+        "r/sidehustle",
+        "r/passive_income"
+      ],
+      "keywords": [
+        "exotic car rental",
+        "supercar rental",
+        "luxury car business",
+        "Lamborghini rental",
+        "Ferrari rental",
+        "exotic car insurance",
+        "exotic car rental startup",
+        "how to start exotic car rental business"
+      ]
+    },
+    "youtube": {
+      "channelTargets": [
+        "DragTimes",
+        "VINwiki",
+        "Supercar Blondie",
+        "TheStradman",
+        "DailyDrivenExotics",
+        "Vehicle Virgins"
+      ],
+      "searchKeywords": [
+        "exotic car rental review",
+        "Turo exotic car rental",
+        "how to rent exotic car",
+        "exotic car rental business",
+        "Lamborghini rental experience",
+        "supercar rental vlog"
+      ]
+    },
+    "googleTrends": {
+      "terms": [
+        "exotic car rental",
+        "supercar rental",
+        "luxury car rental",
+        "Lamborghini rental",
+        "Ferrari rental",
+        "McLaren rental",
+        "Porsche rental"
+      ],
+      "geo": "US",
+      "timeframe": "today 12-m"
+    }
+  },
+  "competitors": [
+    "Turo",
+    "Enterprise Exotic Collection",
+    "Sixt Luxury Cars",
+    "Exotic Car Collection by Enterprise",
+    "Hertz Dream Cars"
+  ],
+  "researchFrequency": {
+    "daily": ["trend_data", "raw_source_data"],
+    "weekly": ["insights", "opportunities", "customer_avatars"],
+    "monthly": ["disruption_reports", "quarterly_industry_reports"]
+  },
+  "marketMetadata": {
+    "avgRentalPricePerDay": 1500,
+    "topVehicles": ["Lamborghini Huracan", "Ferrari 488", "McLaren 570S", "Rolls-Royce Wraith", "Bentley Continental GT"],
+    "primaryMarkets": ["Miami", "Las Vegas", "Los Angeles", "New York", "Dubai"],
+    "marketSizeUsdBillions": 4.2,
+    "yoyGrowthPercent": 8.5
+  }
+}
