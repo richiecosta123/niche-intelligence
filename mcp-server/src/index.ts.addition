@@ -1,0 +1,14 @@
+
+  // Add after query_success_stories tool, before closing bracket ]
+  {
+    name: 'generate_disruption_report',
+    description: 'Generate a 20-page market disruption report synthesizing all intelligence (insights, personas, success stories). Returns analysis + saves to disruption_reports table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to analyze' },
+        report_period: { type: 'string', description: 'e.g. "Q2_2026_Week_1"' },
+      },
+      required: ['niche_id'],
+    },
+  },

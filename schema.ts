@@ -292,6 +292,31 @@ export const search_term_data = pgTable('search_term_data', {
   created_at: timestamp('created_at').notNull().defaultNow(),
 });
 
+export const youtubeChannels = pgTable('youtube_channels', {
+  id: serial('id').primaryKey(),
+  nicheId: integer('niche_id').references(() => niches.id).notNull(),
+
+  channelName: text('channel_name').notNull(),
+  channelId: text('channel_id').notNull(),
+  channelUrl: text('channel_url'),
+
+  // Metrics snapshot
+  subscriberCount: integer('subscriber_count'),
+  totalVideos: integer('total_videos'),
+  avgViews: integer('avg_views'),
+  avgComments: integer('avg_comments'),
+  engagementRatio: decimal('engagement_ratio', { precision: 10, scale: 6 }),
+
+  // Analysis
+  authorityScore: integer('authority_score'), // 0-100
+  tier: text('tier'), // 'TIER_1', 'TIER_2', 'TIER_3'
+  recommendedLimit: integer('recommended_limit'),
+
+  // Tracking
+  analyzedAt: timestamp('analyzed_at').defaultNow(),
+  scrapeCadence: text('scrape_cadence'), // 'weekly', 'monthly', 'one-time'
+});
+
 export const competitor_ad_data = pgTable('competitor_ad_data', {
   id: serial('id').primaryKey(),
   niche_id: integer('niche_id').notNull().references(() => niches.id),

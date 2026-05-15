@@ -29,6 +29,7 @@ async function migrate() {
         insights,
         raw_source_data,
         research_jobs,
+        youtube_channels,
         niches
       CASCADE;
     `);
@@ -390,9 +391,30 @@ async function migrate() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `);
-    console.log('   ✅ competitor_ad_data\n');
+    console.log('   ✅ competitor_ad_data');
 
-    console.log('✨ Migration complete! 17 tables created successfully.');
+    await client.query(`
+      CREATE TABLE youtube_channels (
+        id SERIAL PRIMARY KEY,
+        niche_id INTEGER NOT NULL REFERENCES niches(id),
+        channel_name TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        channel_url TEXT,
+        subscriber_count INTEGER,
+        total_videos INTEGER,
+        avg_views INTEGER,
+        avg_comments INTEGER,
+        engagement_ratio DECIMAL(10,6),
+        authority_score INTEGER,
+        tier TEXT,
+        recommended_limit INTEGER,
+        analyzed_at TIMESTAMP DEFAULT NOW(),
+        scrape_cadence TEXT
+      );
+    `);
+    console.log('   ✅ youtube_channels\n');
+
+    console.log('✨ Migration complete! 18 tables created successfully.');
   } catch (err) {
     console.error('❌ Migration failed:', err);
     process.exit(1);
