@@ -36,9 +36,9 @@ class ScraperArgs:
         keywords: str,
         limit: int = 50,
         full_content: bool = False,
-        headless: bool = True,
+        headless: bool = False,
         slow_mo: int = 100,
-        niche_id: int = 2,
+        niche_id: int = None,
         dry_run: bool = False,
     ):
         self.keywords = keywords
@@ -99,16 +99,18 @@ async def run_all(args):
 
 def main():
     parser = argparse.ArgumentParser(description='Multi-keyword Reddit scraper')
+    parser.add_argument('--niche-id', type=int, required=True,
+                        help='Niche ID (REQUIRED)')
     parser.add_argument('--keywords-list', nargs='+', default=None,
                         help='Override keyword list (space-separated)')
     parser.add_argument('--limit', type=int, default=50, help='Posts per keyword')
     parser.add_argument('--full-content', action='store_true')
-    parser.add_argument('--headless', type=lambda v: v.lower() != 'false', default=True,
-                        metavar='BOOL')
+    parser.add_argument('--headless', action='store_true',
+                        help='Run browser in headless mode (default: visible)')
     parser.add_argument('--slow-mo', type=int, default=100)
-    parser.add_argument('--niche-id', type=int, default=2)
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
+    
     asyncio.run(run_all(args))
 
 
