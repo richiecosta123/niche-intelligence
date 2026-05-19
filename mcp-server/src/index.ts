@@ -30,6 +30,11 @@ const TOOLS = [
           type: 'boolean',
           description: 'true = processed posts only | false = unprocessed only | omit = all',
         },
+        source_type: {
+          type: 'string',
+          description: 'Filter by source: reddit | trustpilot | youtube | google_news | google_trends',
+        },
+        offset: { type: 'number', description: 'Rows to skip for pagination (default: 0)' },
       },
       required: ['niche_id'],
     },
@@ -319,6 +324,8 @@ async function queryRawPosts(a: Args) {
   const niche_id = a.niche_id as number;
   const limit = Math.min((a.limit as number | undefined) ?? 50, 500);
   const processed = a.processed as boolean | undefined;
+  const source_type = a.source_type as string | undefined;
+  const offset = (a.offset as number | undefined) ?? 0;
 
   let extraFilter = '';
   if (processed !== undefined) {
@@ -337,14 +344,22 @@ async function queryRawPosts(a: Args) {
     }
   }
 
+  const params: unknown[] = [niche_id, limit, offset];
+  let sourceFilter = '';
+  if (source_type) {
+    params.push(source_type);
+    sourceFilter = `AND source_type = $${params.length}`;
+  }
+
   const { rows } = await pool.query(
     `SELECT id, niche_id, source_type, source_url, title, content,
             author, score, engagement_metrics, collected_at
      FROM raw_source_data
-     WHERE niche_id = $1 ${extraFilter}
+     WHERE niche_id = $1 ${extraFilter} ${sourceFilter}
      ORDER BY id DESC
-     LIMIT $2`,
-    [niche_id, limit]
+     LIMIT $2
+     OFFSET $3`,
+    params
   );
   return rows;
 }
