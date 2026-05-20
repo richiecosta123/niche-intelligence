@@ -26,7 +26,12 @@ export const personaArchitectTool = {
       systemPrompt,
       instruction:
         'Audit raw_source_data, call expand_research to fill gaps, execute web searches, ' +
-        'then save 3–5 distinct personas via save_persona.',
+        'then generate 8–12 distinct personas. ' +
+        'IMPORTANT: After generating each persona, you MUST immediately call the save_persona tool ' +
+        'with that persona\'s data before moving on to the next one. ' +
+        'Each call must include at minimum: name (descriptive persona name) and avatar_type ' +
+        '(short segment label, e.g. "weekend-seeker", "business-builder", "special-occasion"). ' +
+        'Do not batch or defer — save each persona as soon as it is generated.',
       saveSchema: {
         tool: 'save_persona',
         columns: {
