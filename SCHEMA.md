@@ -739,59 +739,70 @@ raw_source_data (scrapers populate)
 | `query_personas` | SELECT | `customer_avatars` |
 | `get_niche_config` | SELECT | `niches` |
 | `expand_research` | SELECT | `niches` (read-only; returns search queries) |
-| `save_success_story` | INSERT | `success_stories` ⚠️ (column mismatch — see below) |
-| `query_success_stories` | SELECT | `success_stories` |
+| `save_success_story` | INSERT | `success_stories` ✅ fixed c3fe785 |
+| `query_success_stories` | SELECT | `success_stories` ✅ fixed c3fe785 |
 | `generate_disruption_report` | — | No DB write; returns instructions for Market Strategist |
-| `save_disruption_report` | INSERT | `disruption_reports` |
-| `save_marketing_copy` | INSERT | `marketing_copy_library` ⚠️ (column mismatch — see below) |
-| `save_offer` | INSERT | `offer_intelligence` ⚠️ (column mismatch — see below) |
-| `save_financial_analysis` | INSERT | `financial_analysis` ⚠️ (table does not exist) |
-| `save_competitor_analysis` | INSERT | `competitor_analysis` ⚠️ (table does not exist) |
+| `save_disruption_report` | INSERT | `disruption_reports` ✅ fixed 4c9cada |
+| `save_marketing_copy` | INSERT | `marketing_copy_library` ✅ fixed c3fe785 |
+| `save_offer` | INSERT | `offer_intelligence` ✅ fixed c3fe785 |
+| `save_financial_analysis` | INSERT | `financial_analysis` ⚠️ table does not exist — needs CREATE TABLE |
+| `save_competitor_analysis` | INSERT | `competitor_analysis` ⚠️ table does not exist — needs CREATE TABLE |
 | `query_all_intelligence` | SELECT COUNT | `insights`, `customer_avatars`, `success_stories`, `marketing_copy_library`, `offer_intelligence` |
 
 ---
 
 ## Known Discrepancies & TODOs
 
-These mismatches exist between `niche-intel-schema.ts` (original design), `schema.ts` (live schema), and `mcp-server/src/index.ts` (MCP SQL queries).
+### ✅ Fixed (committed)
 
-### 1. Missing Tables
+| Issue | Fix | Commit |
+|-------|-----|--------|
+| `disruption_reports` INSERT used wrong column names (`market_gaps`, `emerging_trends`, etc.) | Remapped to `disruption_signals`, `emerging_technologies`, `competitive_moves`, `recommended_actions` in `market-strategist.ts` | 4c9cada |
+| `success_stories` INSERT used legacy camelCase quoted columns (`"storyTitle"`, `"credibilityScore"`, etc.) | Remapped to live schema: `title`, `source_type`, `source_url`, `key_mechanism`, `quantified_results`, `usable_hooks`, `verified` | c3fe785 |
+| `success_stories` SELECT referenced non-existent `credibility_score`, `story_title`, `discovered_at` | Updated to live schema columns | c3fe785 |
+| `marketing_copy_library` INSERT used `copy_text`, `use_case`, `avatar_target`, `emotional_trigger` | Remapped to `content`, `copy_angle`, `target_avatar_id` (integer FK) | c3fe785 |
+| `offer_intelligence` INSERT used `problem_solved`, `unique_value`, `pricing`, `market_timing`, `anticipated_objections` | Remapped to `core_promise`, `unique_mechanism`, `price_point` (DECIMAL), `pricing_model` | c3fe785 |
 
-`save_financial_analysis` and `save_competitor_analysis` in `index.ts` INSERT into tables that do not exist in `schema.ts` or `migrate.ts`:
+### ⚠️ Remaining Work
 
-- `financial_analysis` — needs CREATE TABLE
-- `competitor_analysis` — needs CREATE TABLE
+#### 1. Missing Tables — `financial_analysis` and `competitor_analysis`
 
-### 2. `success_stories` column names
+`save_financial_analysis` and `save_competitor_analysis` in `index.ts` INSERT into tables that **do not exist** in `schema.ts` or `migrate.ts`. Both tools will throw a PostgreSQL error at runtime.
 
-The MCP `saveSuccessStory` function (index.ts:526) uses quoted camelCase column names from the old schema:
-
+Suggested `financial_analysis` schema:
 ```sql
--- Actual INSERT in index.ts (broken)
-INSERT INTO success_stories (niche_id, "storyTitle", summary, revenue, method,
-  platform, "credibilityScore", "proofLinks", "sourceUrl", "sourceType")
-
--- Live schema columns (schema.ts)
-title, source_type, source_url, protagonist_profile, before_state, after_state,
-transformation, key_mechanism, quantified_results, emotional_arc, usable_hooks, verified
+CREATE TABLE financial_analysis (
+  id SERIAL PRIMARY KEY,
+  niche_id INTEGER NOT NULL REFERENCES niches(id),
+  tam_estimate TEXT NOT NULL,
+  average_cac TEXT,
+  average_ltv TEXT,
+  ltv_cac_ratio TEXT,
+  payback_period TEXT,
+  churn_rate TEXT,
+  unit_economics JSON,
+  analyzed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
 ```
 
-The SELECT in `querySuccessStories` uses snake_case `credibility_score` and `story_title`, which also don't exist in the live schema.
+Suggested `competitor_analysis` schema:
+```sql
+CREATE TABLE competitor_analysis (
+  id SERIAL PRIMARY KEY,
+  niche_id INTEGER NOT NULL REFERENCES niches(id),
+  competitor_name TEXT NOT NULL,
+  positioning TEXT,
+  strengths JSON,
+  weaknesses JSON,
+  gaps_and_opportunities JSON,
+  market_share_estimate TEXT,
+  strategy TEXT,
+  analyzed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+```
 
-### 3. `marketing_copy_library` column names
+#### 2. `insights.confidence_score` range ambiguity
 
-The MCP `saveMarketingCopy` (index.ts:574) inserts into `(copy_type, copy_text, use_case, source_type, avatar_target, emotional_trigger, tags)` but the live schema has `(copy_type, copy_angle, content, target_avatar_id, ...)`.
-
-Mapping divergence:
-- `copy_text` → should be `content`
-- `use_case` → no equivalent in live schema
-- `avatar_target` (string) → should be `target_avatar_id` (integer FK)
-- `emotional_trigger` → no equivalent in live schema
-
-### 4. `offer_intelligence` column names
-
-The MCP `saveOffer` (index.ts:597) inserts `(offer_name, offer_type, target_avatar, problem_solved, unique_value, pricing, market_timing, anticipated_objections)` but the live schema uses `(offer_name, competitor_name, offer_type, price_point, pricing_model, core_promise, unique_mechanism, bonuses, guarantees, ...)`.
-
-### 5. `insights.confidence_score` range
-
-The MCP `saveInsight` (index.ts:403) clamps `confidence_score` to `0–9.99` (treating it as a 0–10 scale), but the live schema defines `DECIMAL(3,2)` which stores `0.00–9.99`. The tool description says `0.0–1.0`. The DB column should be `DECIMAL(4,2)` if 0–10 is intended, or the MCP input range should be 0.0–1.0 with the current column definition.
+The MCP `saveInsight` (index.ts:403) clamps `confidence_score` to `0–9.99` (treating it as a 0–10 scale), but the live schema defines `DECIMAL(3,2)` (stores `0.00–9.99`) and the tool description advertises `0.0–1.0`. Decide: either change the column to `DECIMAL(4,2)` for a 0–10 scale, or enforce `0.0–1.0` input and fix the clamp logic.
