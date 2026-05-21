@@ -513,34 +513,33 @@ async function queryPersonas(a: Args) {
 }
 
 async function saveSuccessStory(a: Args) {
-  const credibility = Math.min(Math.max(Number((a.credibility_score as number).toFixed(2)), 0), 1);
-  
-  if (credibility < 0.5) {
-    throw new Error('Credibility score must be ≥ 0.5 to save a success story');
-  }
-
   const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
 
   const { rows } = await pool.query(
     `INSERT INTO success_stories
-       (niche_id, "storyTitle", summary, revenue, method, platform,
-        "credibilityScore", "proofLinks", "sourceUrl", "sourceType")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-     RETURNING id, discovered_at`,
+       (niche_id, title, source_type, source_url,
+        protagonist_profile, before_state, after_state,
+        transformation, key_mechanism, quantified_results,
+        emotional_arc, usable_hooks, verified)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     RETURNING id, created_at`,
     [
       a.niche_id,
-      a.story_title,
-      a.summary,
-      toJson(a.revenue),
-      a.method,
-      (a.platform as string | undefined) ?? null,
-      credibility,
-      toJson(a.proof_links),
-      a.source_url,
+      a.story_title ?? a.title,
       (a.source_type as string | undefined) ?? null,
+      (a.source_url as string | undefined) ?? null,
+      toJson(a.protagonist_profile),
+      (a.before_state as string | undefined) ?? null,
+      (a.after_state as string | undefined) ?? null,
+      (a.transformation as string | undefined) ?? null,
+      (a.key_mechanism ?? a.method as string | undefined) ?? null,
+      toJson(a.quantified_results ?? a.revenue),
+      toJson(a.emotional_arc),
+      toJson(a.usable_hooks ?? a.proof_links),
+      (a.verified as boolean | undefined) ?? false,
     ]
   );
-  return { success: true, story_id: rows[0].id, discovered_at: rows[0].discovered_at };
+  return { success: true, story_id: rows[0].id, created_at: rows[0].created_at };
 }
 
 async function querySuccessStories(a: Args) {
@@ -548,12 +547,13 @@ async function querySuccessStories(a: Args) {
   const min_credibility = (a.min_credibility as number | undefined) ?? 0.5;
 
   const { rows } = await pool.query(
-    `SELECT id, niche_id, story_title, summary, revenue, method, platform,
-            credibility_score, proof_links, source_url, source_type, discovered_at
+    `SELECT id, niche_id, title, source_type, source_url,
+            protagonist_profile, key_mechanism, quantified_results,
+            usable_hooks, verified, created_at
      FROM success_stories
-     WHERE niche_id = $1 AND credibility_score >= $2
-     ORDER BY credibility_score DESC, discovered_at DESC`,
-    [niche_id, min_credibility]
+     WHERE niche_id = $1
+     ORDER BY created_at DESC`,
+    [niche_id]
   );
   return rows;
 }
@@ -572,21 +572,20 @@ async function generateDisruptionReport(a: Args) {
 
 async function saveMarketingCopy(a: Args) {
   const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+  const avatarId = a.target_avatar_id != null ? Number(a.target_avatar_id) : null;
 
   const { rows } = await pool.query(
     `INSERT INTO marketing_copy_library
-       (niche_id, copy_type, copy_text, use_case, source_type,
-        avatar_target, emotional_trigger, tags)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       (niche_id, copy_type, copy_angle, content,
+        target_avatar_id, tags)
+     VALUES ($1,$2,$3,$4,$5,$6)
      RETURNING id, created_at`,
     [
       a.niche_id,
       a.copy_type,
-      a.copy_text,
-      (a.use_case as string | undefined) ?? null,
-      (a.source_type as string | undefined) ?? null,
-      (a.avatar_target as string | undefined) ?? null,
-      (a.emotional_trigger as string | undefined) ?? null,
+      (a.copy_angle ?? a.emotional_trigger as string | undefined) ?? null,
+      (a.content ?? a.copy_text) as string,
+      avatarId,
       toJson(a.tags),
     ]
   );
@@ -594,27 +593,28 @@ async function saveMarketingCopy(a: Args) {
 }
 
 async function saveOffer(a: Args) {
-  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+  const pricing = a.pricing as Record<string, unknown> | undefined;
+  const pricePoint = pricing?.suggestedPrice != null ? parseFloat(pricing.suggestedPrice as string) : null;
+  const pricingModel = (a.pricing_model ?? pricing?.priceRationale) as string | undefined;
 
   const { rows } = await pool.query(
     `INSERT INTO offer_intelligence
-       (niche_id, offer_name, offer_type, target_avatar, problem_solved,
-        unique_value, pricing, market_timing, anticipated_objections)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-     RETURNING id, generated_at`,
+       (niche_id, offer_name, offer_type, competitor_name,
+        price_point, pricing_model, core_promise, unique_mechanism)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING id, created_at`,
     [
       a.niche_id,
       a.offer_name,
       (a.offer_type as string | undefined) ?? null,
-      (a.target_avatar as string | undefined) ?? null,
-      a.problem_solved,
-      a.unique_value,
-      toJson(a.pricing),
-      toJson(a.market_timing),
-      toJson(a.anticipated_objections),
+      (a.competitor_name ?? a.target_avatar as string | undefined) ?? null,
+      pricePoint,
+      pricingModel ?? null,
+      (a.core_promise ?? a.problem_solved) as string ?? null,
+      (a.unique_mechanism ?? a.unique_value) as string ?? null,
     ]
   );
-  return { success: true, offer_id: rows[0].id, generated_at: rows[0].generated_at };
+  return { success: true, offer_id: rows[0].id, created_at: rows[0].created_at };
 }
 
 async function saveFinancialAnalysis(a: Args) {
