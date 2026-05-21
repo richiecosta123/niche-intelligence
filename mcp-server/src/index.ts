@@ -6,6 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: path.resolve(__dirname, '../../.env') });
 dotenvConfig();
 
+import { saveDisruptionReport } from './brains/market-strategist.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -222,6 +223,24 @@ const TOOLS = [
       properties: {
         niche_id: { type: 'number', description: 'ID of the niche to analyze' },
         report_period: { type: 'string', description: 'e.g. "Q2_2026_Week_1"' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'save_disruption_report',
+    description: 'Save a completed market disruption report to the disruption_reports table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id:                { type: 'number' },
+        report_period:           { type: 'string', description: 'e.g. "Q2_2026_Week_1"' },
+        executive_summary:       { type: 'string', description: 'Full executive summary text' },
+        market_gaps:             { type: 'array', items: { type: 'object' }, description: 'Identified market gaps' },
+        emerging_trends:         { type: 'array', items: { type: 'object' }, description: 'Emerging market trends' },
+        competitor_moves:        { type: 'array', items: { type: 'object' }, description: 'Notable competitor actions' },
+        opportunities_this_week: { type: 'array', items: { type: 'object' }, description: 'Actionable opportunities for this week' },
+        page_count:              { type: 'number', description: 'Number of pages in the report' },
       },
       required: ['niche_id'],
     },
@@ -504,8 +523,8 @@ async function saveSuccessStory(a: Args) {
 
   const { rows } = await pool.query(
     `INSERT INTO success_stories
-       (niche_id, story_title, summary, revenue, method, platform,
-        credibility_score, proof_links, source_url, source_type)
+       (niche_id, "storyTitle", summary, revenue, method, platform,
+        "credibilityScore", "proofLinks", "sourceUrl", "sourceType")
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING id, discovered_at`,
     [
@@ -697,6 +716,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'save_success_story':   result = await saveSuccessStory(a);   break;
       case 'query_success_stories': result = await querySuccessStories(a); break;
       case 'generate_disruption_report': result = await generateDisruptionReport(a); break;
+      case 'save_disruption_report':     result = await saveDisruptionReport(a);     break;
       case 'save_marketing_copy':        result = await saveMarketingCopy(a);        break;
       case 'save_offer':                 result = await saveOffer(a);                break;
       case 'save_financial_analysis':    result = await saveFinancialAnalysis(a);    break;

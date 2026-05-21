@@ -1,6 +1,9 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { Pool } from 'pg';
+
+const pool = new Pool({ connectionString: process.env.NEON_DB_URL });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -8,6 +11,32 @@ const systemPrompt = readFileSync(
   path.join(__dirname, 'prompts/market-strategist.md'),
   'utf-8'
 );
+
+export async function saveDisruptionReport(a: Record<string, unknown>) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+  const report_title = `Market Disruption Report - ${a.report_period ?? 'Unknown Period'}`;
+
+  const { rows } = await pool.query(
+    `INSERT INTO disruption_reports
+       (niche_id, report_title, report_period, executive_summary,
+        disruption_signals, emerging_technologies, competitive_moves,
+        recommended_actions)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING id, created_at AS generated_at`,
+    [
+      a.niche_id,
+      report_title,
+      (a.report_period as string | undefined) ?? null,
+      (a.executive_summary as string | undefined) ?? null,
+      toJson(a.disruption_signals ?? a.market_gaps),
+      toJson(a.emerging_technologies ?? a.emerging_trends),
+      toJson(a.competitive_moves ?? a.competitor_moves),
+      toJson(a.recommended_actions ?? a.opportunities_this_week),
+    ]
+  );
+
+  return { success: true, report_id: rows[0].id, generated_at: rows[0].generated_at };
+}
 
 export const marketStrategistTool = {
   name: 'market_strategist' as const,
