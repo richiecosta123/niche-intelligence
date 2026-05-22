@@ -170,12 +170,13 @@ const TOOLS = [
   },
   {
     name: 'save_success_story',
-    description: 'Save a money-making success story to the database. Stories must have credibility score 0.5+ to be saved.',
+    description: 'Save a story to the stories_library table. Supports multiple story types (default: success_story). Stories must have credibility score 0.5+ to be saved.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         niche_id: { type: 'number' },
         story_title: { type: 'string', description: 'Compelling headline summarizing the story' },
+        story_type: { type: 'string', description: 'Type of story: "success_story", "case_study", "testimonial", etc. Default: "success_story"' },
         summary: { type: 'string', description: 'Brief summary of the success story' },
         revenue: {
           type: 'object',
@@ -202,7 +203,7 @@ const TOOLS = [
   },
   {
     name: 'query_success_stories',
-    description: 'Fetch money-making success stories for a niche, ordered by credibility score.',
+    description: 'Fetch stories from stories_library for a niche, ordered by date. Optionally filter by story_type (e.g. "success_story", "case_study").',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -210,6 +211,10 @@ const TOOLS = [
         min_credibility: {
           type: 'number',
           description: 'Minimum credibility score (0.0-1.0). Default: 0.5',
+        },
+        story_type: {
+          type: 'string',
+          description: 'Filter by story type: "success_story", "case_study", "testimonial", etc. Omit to return all types.',
         },
       },
       required: ['niche_id'],
@@ -331,6 +336,52 @@ const TOOLS = [
         },
       },
       required: ['niche_id', 'query_type'],
+    },
+  },
+  {
+    name: 'save_hook',
+    description: 'Save a marketing hook to hooks_library. Hooks are attention-grabbing lines used in copy, ads, and content.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        hook_text: { type: 'string', description: 'The hook line itself' },
+        hook_type: {
+          type: 'string',
+          description: 'Hook category: "curiosity" | "fear" | "desire" | "social_proof" | "urgency"',
+        },
+        target_avatar_id: { type: 'number', description: 'Optional: link to a specific customer_avatars.id' },
+        source_insight_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'IDs of insights this hook was derived from',
+        },
+        performance_data: {
+          type: 'object',
+          description: 'Optional JSONB: e.g. { ctr: 0.04, conversions: 12, platform: "facebook" }',
+        },
+      },
+      required: ['niche_id', 'hook_text', 'hook_type', 'source_insight_ids'],
+    },
+  },
+  {
+    name: 'query_hooks',
+    description: 'Retrieve marketing hooks from hooks_library for a niche. Filter by type, avatar, or minimum performance score.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number' },
+        hook_type: {
+          type: 'string',
+          description: 'Filter by type: "curiosity" | "fear" | "desire" | "social_proof" | "urgency"',
+        },
+        target_avatar_id: { type: 'number', description: 'Filter by linked avatar ID' },
+        min_performance_score: {
+          type: 'number',
+          description: 'Filter by minimum performance score (0.0-1.0) if tracked',
+        },
+      },
+      required: ['niche_id'],
     },
   },
 ];
@@ -516,15 +567,16 @@ async function saveSuccessStory(a: Args) {
   const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
 
   const { rows } = await pool.query(
-    `INSERT INTO success_stories
-       (niche_id, title, source_type, source_url,
+    `INSERT INTO stories_library
+       (niche_id, story_type, title, source_type, source_url,
         protagonist_profile, before_state, after_state,
         transformation, key_mechanism, quantified_results,
         emotional_arc, usable_hooks, verified)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING id, created_at`,
     [
       a.niche_id,
+      (a.story_type as string | undefined) ?? 'success_story',
       a.story_title ?? a.title,
       (a.source_type as string | undefined) ?? null,
       (a.source_url as string | undefined) ?? null,
@@ -546,14 +598,22 @@ async function querySuccessStories(a: Args) {
   const niche_id = a.niche_id as number;
   const min_credibility = (a.min_credibility as number | undefined) ?? 0.5;
 
+  const story_type = a.story_type as string | undefined;
+  const params: unknown[] = [niche_id];
+  let typeFilter = '';
+  if (story_type) {
+    params.push(story_type);
+    typeFilter = ` AND story_type = $${params.length}`;
+  }
+
   const { rows } = await pool.query(
-    `SELECT id, niche_id, title, source_type, source_url,
+    `SELECT id, niche_id, story_type, title, source_type, source_url,
             protagonist_profile, key_mechanism, quantified_results,
             usable_hooks, verified, created_at
-     FROM success_stories
-     WHERE niche_id = $1
+     FROM stories_library
+     WHERE niche_id = $1${typeFilter}
      ORDER BY created_at DESC`,
-    [niche_id]
+    params
   );
   return rows;
 }
@@ -663,6 +723,61 @@ async function saveCompetitorAnalysis(a: Args) {
   return { success: true, analysis_id: rows[0].id, analyzed_at: rows[0].analyzed_at };
 }
 
+async function saveHook(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO hooks_library
+       (niche_id, hook_text, hook_type, target_avatar_id, source_insight_ids, performance_data)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, created_at`,
+    [
+      a.niche_id,
+      a.hook_text,
+      a.hook_type,
+      (a.target_avatar_id as number | undefined) ?? null,
+      toJson(a.source_insight_ids ?? []),
+      toJson(a.performance_data),
+    ]
+  );
+  return { success: true, hook_id: rows[0].id, created_at: rows[0].created_at };
+}
+
+async function queryHooks(a: Args) {
+  const niche_id = a.niche_id as number;
+  const hook_type = a.hook_type as string | undefined;
+  const target_avatar_id = a.target_avatar_id as number | undefined;
+  const min_performance_score = a.min_performance_score as number | undefined;
+
+  const params: unknown[] = [niche_id];
+  const filters: string[] = [];
+
+  if (hook_type) {
+    params.push(hook_type);
+    filters.push(`hook_type = $${params.length}`);
+  }
+  if (target_avatar_id != null) {
+    params.push(target_avatar_id);
+    filters.push(`target_avatar_id = $${params.length}`);
+  }
+  if (min_performance_score != null) {
+    params.push(min_performance_score);
+    filters.push(`(performance_data->>'score')::numeric >= $${params.length}`);
+  }
+
+  const where = filters.length ? ' AND ' + filters.join(' AND ') : '';
+
+  const { rows } = await pool.query(
+    `SELECT id, niche_id, hook_text, hook_type, target_avatar_id,
+            source_insight_ids, performance_data, created_at
+     FROM hooks_library
+     WHERE niche_id = $1${where}
+     ORDER BY created_at DESC`,
+    params
+  );
+  return rows;
+}
+
 async function queryAllIntelligence(a: Args) {
   const niche_id = a.niche_id as number;
   const query_type = a.query_type as string;
@@ -672,7 +787,7 @@ async function queryAllIntelligence(a: Args) {
   const counts = await Promise.all([
     pool.query('SELECT COUNT(*) as count FROM insights WHERE niche_id = $1', [niche_id]),
     pool.query('SELECT COUNT(*) as count FROM customer_avatars WHERE niche_id = $1', [niche_id]),
-    pool.query('SELECT COUNT(*) as count FROM success_stories WHERE niche_id = $1', [niche_id]),
+    pool.query('SELECT COUNT(*) as count FROM stories_library WHERE niche_id = $1', [niche_id]),
     pool.query('SELECT COUNT(*) as count FROM marketing_copy_library WHERE niche_id = $1', [niche_id]),
     pool.query('SELECT COUNT(*) as count FROM offer_intelligence WHERE niche_id = $1', [niche_id]),
   ]);
@@ -721,7 +836,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'save_offer':                 result = await saveOffer(a);                break;
       case 'save_financial_analysis':    result = await saveFinancialAnalysis(a);    break;
       case 'save_competitor_analysis':   result = await saveCompetitorAnalysis(a);   break;
-      case 'query_all_intelligence':     result = await queryAllIntelligence(a);     break;
+      case 'save_hook':                   result = await saveHook(a);                 break;
+      case 'query_hooks':                 result = await queryHooks(a);               break;
+      case 'query_all_intelligence':      result = await queryAllIntelligence(a);     break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],
