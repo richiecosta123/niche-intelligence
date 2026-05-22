@@ -492,33 +492,37 @@ export const competitorAdData = pgTable('competitor_ad_data', {
   id: serial('id').primaryKey(),
   nicheId: integer('niche_id').references(() => niches.id).notNull(),
   
-  advertiser: text('advertiser').notNull(),
-  estimatedMonthlySpend: integer('estimated_monthly_spend'),
-  spendTrend: text('spend_trend'),
+  competitorName: text('competitor_name').notNull(),
+  platform: text('platform').notNull(), // 'facebook' | 'google' | 'tiktok' | 'instagram'
   
-  adCreatives: json('ad_creatives').$type<Array<{
-    adId: string;
-    headline: string;
-    description: string;
-    cta: string;
-    landingPage: string;
-    firstSeen: string;
-    lastSeen: string;
-  }>>(),
+  adId: text('ad_id'), // Platform-native ad ID
+  adType: text('ad_type'), // 'image' | 'video' | 'carousel'
   
-  topPublishers: json('top_publishers').$type<Array<{
-    publisher: string;
-    impressionShare: number;
-  }>>(),
+  headline: text('headline'),
+  bodyText: text('body_text'),
+  cta: text('cta'), // Call to action text
   
-  longestRunningAds: json('longest_running_ads').$type<Array<{
-    adId: string;
-    runningDays: number;
-    reasoning: string;
-  }>>(),
+  mediaUrl: text('media_url'), // URL of ad creative
+  landingPageUrl: text('landing_page_url'),
   
-  monthYear: text('month_year'),
-  fetchedAt: timestamp('fetched_at').defaultNow(),
+  estimatedSpend: json('estimated_spend').$type<{
+    min: number;
+    max: number;
+    currency: string;
+  }>(),
+  
+  estimatedImpressions: json('estimated_impressions').$type<{
+    min: number;
+    max: number;
+  }>(),
+  
+  runningSince: timestamp('running_since'), // First observed date
+  lastSeenAt: timestamp('last_seen_at'), // Last observed date (updated on subsequent runs)
+  
+  adMetadata: json('ad_metadata'), // Platform-specific extra fields
+  
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 // ============================================
