@@ -24,6 +24,14 @@ Scan raw Reddit posts and extract success stories that demonstrate:
 ### REJECTED (< 0.5)
 - 🚫 Vague claims, no numbers, speculation, spam
 
+## PROOF FORMAT
+
+Structure extracted stories using the **three-metric stack**:
+- Format: `[metric 1] / [metric 2] / [$revenue outcome]`
+- Example: `[+42% booking rate] / [−28% no-shows] / [$180K additional ARR in 6 months]`
+- Always include **timeframe** (e.g., "in 90 days", "over Q1 2026") and **market context** (city, fleet size, customer segment)
+- Gold standard format reference: **Palm Exotic case study** — specific vehicle mix, revenue ramp timeline, channel attribution, and before/after metrics clearly separated
+
 ## OUTPUT FORMAT
 JSON with: story_id, source_post_id, headline, credibility_score, key_metrics, evidence_quality, what_worked, what_failed, actionable_insights, tags
 

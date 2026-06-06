@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Last Updated:** May 22, 2026  
-**Total Tables:** 19 (4 foundation + 10 intelligence + 2 supporting + 3 extensible)
+**Total Tables:** 22 (4 foundation + 10 intelligence + 2 supporting + 3 extensible + 3 apex intelligence)
 
 > **Purpose:** This document serves as the single source of truth for all database schema information, ensuring alignment between TypeScript definitions, SQL migrations, and MCP tool implementations.
 
@@ -16,7 +16,8 @@
 2. [Intelligence Tables](#intelligence-tables)
 3. [Supporting Tables](#supporting-tables)
 4. [Extensible Data Source Tables](#extensible-data-source-tables)
-5. [Foreign Key Relationships](#foreign-key-relationships)
+5. [Apex Intelligence Tables](#apex-intelligence-tables)
+6. [Foreign Key Relationships](#foreign-key-relationships)
 6. [JSON Column Structures](#json-column-structures)
 7. [Brain → Table Mapping](#brain--table-mapping)
 8. [Brain Dependency Flow](#brain-dependency-flow)
@@ -467,6 +468,70 @@ Registry of brains per niche — execution order, scheduling, and dependency gra
 
 ---
 
+## Apex Intelligence Tables
+
+### authority_sources
+
+Thought-leadership firms, research houses, and authoritative publishers tracked for content benchmarking and citation.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | SERIAL | PK | |
+| firm_name | TEXT | NOT NULL | Name of the firm or authority source |
+| content_hubs | JSONB | | URLs and sections where they publish (e.g. `{ blog, reports, newsletter }`) |
+| report_structure | TEXT | | How they structure their reports/content |
+| tone_style | TEXT | | Writing tone and style (e.g. "authoritative", "data-driven") |
+| visual_design | TEXT | | Notes on visual/brand design approach |
+| frameworks | JSONB | | Proprietary frameworks or methodologies they publish |
+| paid_amplification | TEXT | | Notes on paid distribution/amplification strategy |
+| luxury_content | TEXT | | Notes on luxury/premium content positioning |
+| raw_notes | TEXT | | Free-form research notes |
+| created_at | TIMESTAMP | NOT NULL DEFAULT NOW() | |
+
+---
+
+### association_intelligence
+
+Trade associations and industry bodies tracked for citation authority and publication monitoring.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | SERIAL | PK | |
+| name | TEXT | NOT NULL | Full name of the association |
+| acronym | VARCHAR(50) | | Short acronym, e.g. "NADA" |
+| website | TEXT | | Association website URL |
+| geo_focus | TEXT | | Geographic scope, e.g. "US", "Global" |
+| vertical | TEXT | | Industry vertical, e.g. "automotive", "hospitality" |
+| citation_tier | INTEGER | | Citation authority tier (1 = highest) |
+| public_publications | JSONB | | Array/object of publicly available publications |
+| monitor_urls | JSONB | | Array of URLs to monitor for new content |
+| citation_use | TEXT | | Notes on how/when to cite this association |
+| notes | TEXT | | Free-form research notes |
+| created_at | TIMESTAMP | NOT NULL DEFAULT NOW() | |
+
+---
+
+### agency_benchmarks
+
+Competitor agency profiles for positioning benchmarks, pricing signals, and case study analysis.
+
+| Column | Type | Constraints | Purpose |
+|--------|------|-------------|---------|
+| id | SERIAL | PK | |
+| agency_name | TEXT | NOT NULL | Name of the agency |
+| tier | VARCHAR(100) | | Agency tier, e.g. "boutique", "mid-market", "enterprise" |
+| website | TEXT | | Agency website URL |
+| headline_positioning | TEXT | | Their main positioning headline or tagline |
+| outcome_language | TEXT | | How they describe client outcomes and results |
+| proprietary_frameworks | JSONB | | Their proprietary methodologies or frameworks |
+| pricing_signals | TEXT | | Pricing tier signals or indicators from their site |
+| case_study_format | TEXT | | How they structure and present case studies |
+| meta_ads | JSONB | | Notes or data on their Meta/Facebook ad strategy |
+| notes | TEXT | | Free-form research notes |
+| created_at | TIMESTAMP | NOT NULL DEFAULT NOW() | |
+
+---
+
 ## Foreign Key Relationships
 
 ```
@@ -679,6 +744,9 @@ raw_source_data  (scrapers populate)
 | save_financial_analysis | INSERT | financial_analysis ⚠️ |
 | save_competitor_analysis | INSERT | competitor_analysis ⚠️ |
 | query_all_intelligence | SELECT | insights, customer_avatars, stories_library, marketing_copy_library, offer_intelligence, hooks_library |
+| save_authority_source | INSERT | authority_sources |
+| save_association | INSERT | association_intelligence |
+| save_agency_benchmark | INSERT | agency_benchmarks |
 
 ---
 

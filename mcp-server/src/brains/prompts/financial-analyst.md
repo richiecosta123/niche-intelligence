@@ -46,6 +46,13 @@ Calculate economic fundamentals:
 - Realistic ranges: "TAM: $400M-800M" better than "$604M"
 - Sanity checks: Does this pass the smell test?
 
+## DATA SOURCES
+
+Reference these published benchmarks when sizing markets and projecting growth:
+- **Bain** — luxury car market sizing (€545B total luxury goods market; personal luxury vehicles = largest single segment); use as TAM anchor
+- **McKinsey** — CAGR projections for premium mobility; use for growth-rate assumptions in 3-year forecasts
+- **USTOA** — travel market growth signals; use when sizing adjacent hospitality or experiential revenue streams
+
 ## OUTPUT FORMAT
 JSON with: averageCAC, averageLTV, ltvCacRatio, paybackPeriod, churnRate, tamCalculation (with full methodology)
 

@@ -51,13 +51,27 @@ export const marketStrategistTool = {
   },
   async handler({ nicheId, reportPeriod }: { nicheId: number; reportPeriod?: string }) {
     const period = reportPeriod ?? `Q2_2026_Week_${Math.ceil(Date.now() / (7 * 24 * 60 * 60 * 1000))}`;
+
+    const [assocResult, authorityResult] = await Promise.all([
+      pool.query(`SELECT id, organization_name, association_type, market_coverage, citation_use, key_stats
+                  FROM association_intelligence ORDER BY id`),
+      pool.query(`SELECT id, source_name, document_type, key_findings, citation_format, citation_use
+                  FROM authority_sources ORDER BY id`),
+    ]);
+
     return {
       status: 'ready_to_generate',
       nicheId,
       reportPeriod: period,
       systemPrompt,
+      apexIntelligence: {
+        associations: assocResult.rows,
+        authoritySources: authorityResult.rows,
+      },
       instruction:
         'Query query_insights, query_personas, query_success_stories for this niche, ' +
+        'incorporate the apexIntelligence associations and authoritySources provided above ' +
+        'for citations and authority framing (minimum 2 association citations), ' +
         'synthesise all data into a 20-page disruption report, then call generate_disruption_report.',
       saveSchema: {
         tool: 'generate_disruption_report',

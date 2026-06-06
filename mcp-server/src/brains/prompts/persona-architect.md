@@ -54,5 +54,12 @@ Each persona must have:
 - **Objections**: Real hesitations with language pulled from source data
 - **Preferred channels**: Where they actually consume content and make decisions
 
+## AUTHORITY REFERENCES
+
+Ground personas in published luxury research where available:
+- **Luxury Institute UHNW research** — behavioral and psychographic data on ultra-high-net-worth individuals; use when building UHNW or aspirational buyer personas
+- **Bain luxury consumer segmentation** — use their wealth tiers as reference: Affluent (€1M–€20M EUR), UHNWI (€20M+ EUR)
+- **McKinsey premium car owner behavioral data** — use for mobility-adjacent personas (decision-making patterns, brand loyalty drivers, experience expectations)
+
 ## Output Standard
 Personas must be grounded in evidence from raw data. If you assert something, you should be able to point to a source post or insight that supports it. Flag low-confidence assumptions explicitly.

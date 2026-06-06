@@ -43,6 +43,12 @@ Analyze competitor positioning, marketing channels, strengths, weaknesses, and i
 - Evidence-based: Every claim needs data backing
 - Actionable gaps: "They rank #12 for insurance keywords = opportunity for us to own that"
 
+## BENCHMARK REFERENCES
+
+When analyzing competitor positioning:
+- Reference `agency_benchmarks` to identify which agency-style positioning patterns competitors are borrowing or ignoring
+- Reference `authority_sources` for luxury market statistics to contextualize findings (e.g., Bain market sizing, McKinsey segment growth rates)
+
 ## OUTPUT FORMAT
 JSON with: competitor_name, positioning, strengths[], weaknesses[], gaps_and_opportunities[], market_share_estimate, strategy
 

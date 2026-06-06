@@ -1,18 +1,69 @@
 import { config as dotenvConfig } from 'dotenv';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { spawn } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: path.resolve(__dirname, '../../.env') });
 dotenvConfig();
 
 import { saveDisruptionReport } from './brains/market-strategist.js';
+import { runHookExtractor } from './brains/hook-extractor.js';
+import { runStoryExtractor } from './brains/story-extractor.js';
+import { runOfferExtractor } from './brains/offer-extractor.js';
+import { runApexPositioningBrain } from './brains/apex-positioning.js';
+import { runClientIntelligenceBrain } from './brains/client-intelligence.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { Pool } from 'pg';
 
 const pool = new Pool({ connectionString: process.env.NEON_DB_URL });
+
+// ─── Script Runner ─────────────────────────────────────────────────────────────
+
+const SCRIPTS_DIR = '/Users/ricardo/niche-intelligence';
+const SCRIPT_TIMEOUT_MS = 300_000; // 5 min
+
+type ScriptResult = { success: boolean; output: string; error?: string };
+
+function spawnScript(script: string, args: string[]): Promise<ScriptResult> {
+  return new Promise((resolve) => {
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    const child = spawn('python3', [path.join(SCRIPTS_DIR, script), ...args], {
+      cwd: SCRIPTS_DIR,
+      env: process.env,
+    });
+
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      resolve({ success: false, output: '', error: `Timed out after ${SCRIPT_TIMEOUT_MS / 1000}s` });
+    }, SCRIPT_TIMEOUT_MS);
+
+    child.stdout.on('data', (d: Buffer) => stdoutChunks.push(d));
+    child.stderr.on('data', (d: Buffer) => stderrChunks.push(d));
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const out = Buffer.concat(stdoutChunks).toString().trim();
+      const err = Buffer.concat(stderrChunks).toString().trim();
+      // Combine both streams — Python logging goes to stdout in these scrapers
+      const output = [out, err].filter(Boolean).join('\n');
+      if (code === 0) {
+        resolve({ success: true, output });
+      } else {
+        resolve({ success: false, output, error: `Exit code ${code}` });
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ success: false, output: '', error: err.message });
+    });
+  });
+}
 
 // ─── Tool Definitions ──────────────────────────────────────────────────────────
 
@@ -339,6 +390,51 @@ const TOOLS = [
     },
   },
   {
+    name: 'extract_hooks',
+    description:
+      'Autonomous Hook Extractor Brain: scans competitor_ad_data, raw_source_data, insights (language_pattern), ' +
+      'and stories_library to extract attention-grabbing marketing hooks using Claude AI. ' +
+      'Saves unique hooks to hooks_library with ai_generated=false and approved=false (needs human review). ' +
+      'Returns count of hooks inserted.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to extract hooks for' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'extract_offers',
+    description:
+      'Autonomous Offer Extractor Brain: scans competitor_ad_data, raw_source_data, insights ' +
+      '(competitor_gap, market_timing), and stories_library to extract product/service offers with ' +
+      'pricing, positioning, and value propositions using Claude AI. ' +
+      'Saves unique offers to offer_intelligence. Returns count of offers inserted.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to extract offers for' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'extract_stories',
+    description:
+      'Autonomous Story Extractor Brain: scans raw_source_data (Reddit, YouTube, reviews), competitor_ad_data, ' +
+      'and insights to extract transformation narratives, success stories, testimonials, and case studies using Claude AI. ' +
+      'Saves unique stories to stories_library with verified=false (needs human review). ' +
+      'Returns count of stories inserted.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to extract stories for' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
     name: 'save_hook',
     description: 'Save a marketing hook to hooks_library. Hooks are attention-grabbing lines used in copy, ads, and content.',
     inputSchema: {
@@ -348,7 +444,11 @@ const TOOLS = [
         hook_text: { type: 'string', description: 'The hook line itself' },
         hook_type: {
           type: 'string',
-          description: 'Hook category: "curiosity" | "fear" | "desire" | "social_proof" | "urgency"',
+          description: 'Hook category: curiosity | fear | desire | social_proof | urgency | pattern_interrupt',
+        },
+        customer_language_quote: {
+          type: 'string',
+          description: 'Original customer quote this hook was derived from (if applicable)',
         },
         target_avatar_id: { type: 'number', description: 'Optional: link to a specific customer_avatars.id' },
         source_insight_ids: {
@@ -356,12 +456,29 @@ const TOOLS = [
           items: { type: 'number' },
           description: 'IDs of insights this hook was derived from',
         },
+        usage_context: {
+          type: 'string',
+          description: 'Where this hook works best: ad | email_subject | landing_page | social_post | vsl_opener',
+        },
+        ai_generated: {
+          type: 'boolean',
+          description: 'true if AI-generated copy, false if extracted from real data (default: true)',
+        },
+        approved: {
+          type: 'boolean',
+          description: 'Human review flag — false until reviewed (default: false)',
+        },
         performance_data: {
           type: 'object',
-          description: 'Optional JSONB: e.g. { ctr: 0.04, conversions: 12, platform: "facebook" }',
+          description: 'Optional JSONB: e.g. { ctr: 0.04, conversions: 12, platform: "facebook", source_url: "..." }',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keyword tags for filtering (e.g. ["deposit", "fear", "lamborghini"])',
         },
       },
-      required: ['niche_id', 'hook_text', 'hook_type', 'source_insight_ids'],
+      required: ['niche_id', 'hook_text', 'hook_type'],
     },
   },
   {
@@ -373,15 +490,280 @@ const TOOLS = [
         niche_id: { type: 'number' },
         hook_type: {
           type: 'string',
-          description: 'Filter by type: "curiosity" | "fear" | "desire" | "social_proof" | "urgency"',
+          description: 'Filter by type: curiosity | fear | desire | social_proof | urgency | pattern_interrupt',
         },
         target_avatar_id: { type: 'number', description: 'Filter by linked avatar ID' },
+        approved: {
+          type: 'boolean',
+          description: 'true = approved hooks only | false = pending review | omit = all',
+        },
         min_performance_score: {
           type: 'number',
           description: 'Filter by minimum performance score (0.0-1.0) if tracked',
         },
       },
       required: ['niche_id'],
+    },
+  },
+  {
+    name: 'run_reddit_scraper',
+    description:
+      'Spawn the Reddit scraper (run_full_scrape.py) to collect posts for a niche using Playwright headlessly. ' +
+      'Saves results to raw_source_data. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to scrape for' },
+        limit: { type: 'number', description: 'Posts per keyword (default: 50)' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'run_google_trends',
+    description:
+      'Spawn the Google Trends scraper to collect weekly search volume, US regional data, and related queries ' +
+      'for 9 exotic-car-rental keywords. Saves 3 rows per keyword to raw_source_data. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID (used for logging; scraper targets niche 1)' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'run_youtube_scraper',
+    description:
+      'Spawn the YouTube scraper to collect videos and comments for a niche. ' +
+      'Saves results to raw_source_data. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to tag records with' },
+        search: {
+          type: 'string',
+          description: 'YouTube search query (default: "exotic car rental")',
+        },
+        limit: { type: 'number', description: 'Max videos to collect (default: 20)' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'run_review_scraper',
+    description:
+      'Spawn the review scraper (Playwright) to collect Trustpilot or Yelp reviews for a niche. ' +
+      'Saves results to raw_source_data. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to tag records with' },
+        platform: {
+          type: 'string',
+          description: 'Review platform to scrape: trustpilot | yelp (default: trustpilot)',
+        },
+        limit: { type: 'number', description: 'Max reviews to collect (default: 50)' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'run_facebook_scraper',
+    description:
+      'Spawn the Facebook Ad Library scraper to collect competitor ads for a niche. ' +
+      'Saves results to competitor_ad_data. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to tag records with' },
+        competitors: {
+          type: 'string',
+          description: 'Comma-separated competitor/page names, e.g. "Hertz Dream Cars,Gotham Dream Cars"',
+        },
+        max_ads: { type: 'number', description: 'Max ads per competitor (default: 50)' },
+      },
+      required: ['niche_id', 'competitors'],
+    },
+  },
+  {
+    name: 'run_landing_page_scraper',
+    description:
+      'Spawn the landing page scraper to visit competitor landing_page_urls from competitor_ad_data ' +
+      'and extract pricing, headlines, CTAs, and copy. Saves results to raw_source_data as ' +
+      'source_type=landing_page. Skips URLs already scraped. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to scrape landing pages for' },
+        limit: { type: 'number', description: 'Max pages to visit (default: 20)' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'browse_page',
+    description:
+      'Visit any URL with a headless Playwright browser, wait for JS to load, and return the full ' +
+      'page content as text plus all links. Use for ad hoc research, competitor page analysis, ' +
+      'or reading any URL. Returns { title, text_content, links, url }.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        url: { type: 'string', description: 'The URL to visit' },
+        wait_for: {
+          type: 'string',
+          description: 'Optional CSS selector to wait for before extracting content',
+        },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'save_authority_source',
+    description: 'Save an authority/thought-leadership source (e.g. consulting firm, research house) to the authority_sources table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        firm_name: { type: 'string', description: 'Name of the firm or authority source' },
+        content_hubs: { type: 'object', description: 'JSONB: URLs and sections where they publish (e.g. { blog: "...", reports: "..." })' },
+        report_structure: { type: 'string', description: 'How they structure their reports/content' },
+        tone_style: { type: 'string', description: 'Writing tone and style (e.g. "authoritative", "data-driven")' },
+        visual_design: { type: 'string', description: 'Notes on visual/brand design approach' },
+        frameworks: { type: 'object', description: 'JSONB: Proprietary frameworks or methodologies they use' },
+        paid_amplification: { type: 'string', description: 'Notes on paid distribution/amplification strategy' },
+        luxury_content: { type: 'string', description: 'Notes on luxury/premium content positioning' },
+        raw_notes: { type: 'string', description: 'Free-form research notes' },
+      },
+      required: ['firm_name'],
+    },
+  },
+  {
+    name: 'save_association',
+    description: 'Save a trade association or industry body to the association_intelligence table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Full name of the association' },
+        acronym: { type: 'string', description: 'Short acronym, e.g. "NADA"' },
+        website: { type: 'string', description: 'Association website URL' },
+        geo_focus: { type: 'string', description: 'Geographic scope, e.g. "US", "Global", "Southeast Asia"' },
+        vertical: { type: 'string', description: 'Industry vertical, e.g. "automotive", "hospitality"' },
+        citation_tier: { type: 'number', description: 'Citation authority tier (1 = highest)' },
+        public_publications: { type: 'object', description: 'JSONB: Array/object of publicly available publications' },
+        monitor_urls: { type: 'object', description: 'JSONB: Array of URLs to monitor for new content' },
+        citation_use: { type: 'string', description: 'Notes on how/when to cite this association' },
+        notes: { type: 'string', description: 'Free-form research notes' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'save_agency_benchmark',
+    description: 'Save a competitor agency benchmark to the agency_benchmarks table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        agency_name: { type: 'string', description: 'Name of the agency' },
+        tier: { type: 'string', description: 'Agency tier classification, e.g. "boutique", "mid-market", "enterprise"' },
+        website: { type: 'string', description: 'Agency website URL' },
+        headline_positioning: { type: 'string', description: 'Their main positioning headline/tagline' },
+        outcome_language: { type: 'string', description: 'How they describe client outcomes and results' },
+        proprietary_frameworks: { type: 'object', description: 'JSONB: Their proprietary methodologies or frameworks' },
+        pricing_signals: { type: 'string', description: 'Pricing tier signals or indicators from their site' },
+        case_study_format: { type: 'string', description: 'How they structure and present case studies' },
+        meta_ads: { type: 'object', description: 'JSONB: Notes or data on their Meta/Facebook ad strategy' },
+        notes: { type: 'string', description: 'Free-form research notes' },
+      },
+      required: ['agency_name'],
+    },
+  },
+  {
+    name: 'run_apex_positioning_brain',
+    description:
+      'Apex Positioning Brain: gathers Apex\'s scraped website content, all agency benchmarks, ' +
+      'all authority/consulting firm sources, and all association intelligence. ' +
+      'Returns a structured payload for conversational Claude to analyze positioning gaps, strengths, ' +
+      'and opportunities. Save result via save_apex_positioning_brief.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'run_client_intelligence_brain',
+    description:
+      'Client Intelligence Brain: gathers the latest Apex positioning brief (style guide), ' +
+      'plus all niche intelligence (insights, personas, stories, hooks, offers, Google Trends, ' +
+      'competitor ads, disruption reports) for a niche. ' +
+      'Returns a structured payload for conversational Claude to synthesize into a client intelligence report. ' +
+      'Save result via save_client_intelligence_report.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id:    { type: 'number', description: 'ID of the niche to gather intelligence for' },
+        client_name: { type: 'string', description: 'Optional: specific client name this report is for' },
+        city:        { type: 'string', description: 'Optional: city or market this report targets' },
+        report_type: {
+          type: 'string',
+          description: 'Report type: state_of_market | opportunity_brief | competitive_landscape (default: state_of_market)',
+        },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'save_apex_positioning_brief',
+    description: 'Save an Apex positioning brief and style guide to the apex_positioning_briefs table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        version:                     { type: 'string', description: 'Version label, e.g. "v1.0" or date-stamped' },
+        current_positioning:         { type: 'string', description: 'Narrative summary of Apex\'s current positioning' },
+        positioning_gaps:            { type: 'object', description: 'Areas where Apex is weaker than benchmarks' },
+        positioning_strengths:       { type: 'object', description: 'Areas where Apex already leads or differentiates' },
+        positioning_opportunities:   { type: 'object', description: 'Specific moves Apex should make' },
+        agency_comparisons:          { type: 'object', description: 'Side-by-side benchmark analysis per agency' },
+        consulting_firm_comparisons: { type: 'object', description: 'Comparison against authority/consulting firm formats' },
+        methodology_recommendations: { type: 'string', description: 'Recommended proprietary methodology to develop' },
+        pricing_recommendations:     { type: 'string', description: 'Packaging and pricing tier guidance' },
+        packaging_recommendations:   { type: 'string', description: 'How to structure service packages' },
+        proposal_language:           { type: 'object', description: 'Recommended language patterns for proposals' },
+        citation_recommendations:    { type: 'object', description: 'Which associations/sources to cite and how' },
+        report_format:               { type: 'string', description: 'Recommended report structure and section order' },
+        tone_guidelines:             { type: 'string', description: 'Voice, tone, and style directives' },
+        citation_style:              { type: 'string', description: 'Citation formatting standard to adopt' },
+        framework_naming:            { type: 'object', description: 'Proprietary framework names and descriptions' },
+        visual_guidelines:           { type: 'string', description: 'Visual design and branding directives' },
+        raw_analysis:                { type: 'string', description: 'Full unstructured analysis text' },
+      },
+      required: ['current_positioning'],
+    },
+  },
+  {
+    name: 'save_client_intelligence_report',
+    description: 'Save a synthesized client intelligence report to the client_intelligence_reports table.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id:                   { type: 'number' },
+        client_name:                { type: 'string', description: 'Name of the specific client (optional)' },
+        city:                       { type: 'string', description: 'City or market this report targets (optional)' },
+        report_type:                { type: 'string', description: 'state_of_market | opportunity_brief | competitive_landscape' },
+        report_period:              { type: 'string', description: 'e.g. "Q2_2026"' },
+        positioning_brief_id:       { type: 'number', description: 'ID of apex_positioning_briefs row used as style guide' },
+        executive_summary:          { type: 'string', description: '2-3 paragraph executive summary' },
+        market_overview:            { type: 'string', description: 'Narrative market analysis' },
+        uhnw_persona_profiles:      { type: 'object', description: 'Persona breakdowns relevant to this client' },
+        seasonality_data:           { type: 'object', description: 'Seasonal patterns and timing opportunities' },
+        competitor_ad_intelligence: { type: 'object', description: 'Curated competitor ad insights' },
+        hooks_and_offers:           { type: 'object', description: 'Recommended hooks and offer structures' },
+        citations:                  { type: 'object', description: 'Data citations per section' },
+        recommendations:            { type: 'object', description: 'Prioritized action items' },
+        full_report:                { type: 'string', description: 'Complete formatted report text' },
+      },
+      required: ['niche_id', 'report_type'],
     },
   },
 ];
@@ -728,16 +1110,24 @@ async function saveHook(a: Args) {
 
   const { rows } = await pool.query(
     `INSERT INTO hooks_library
-       (niche_id, hook_text, hook_type, target_avatar_id, source_insight_ids, performance_data)
-     VALUES ($1, $2, $3, $4, $5, $6)
+       (niche_id, hook_text, hook_type, customer_language_quote,
+        target_avatar_id, source_insight_ids, usage_context,
+        performance_data, tags, ai_generated, approved,
+        created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
      RETURNING id, created_at`,
     [
       a.niche_id,
       a.hook_text,
       a.hook_type,
+      (a.customer_language_quote as string | undefined) ?? null,
       (a.target_avatar_id as number | undefined) ?? null,
       toJson(a.source_insight_ids ?? []),
+      (a.usage_context as string | undefined) ?? null,
       toJson(a.performance_data),
+      toJson(a.tags),
+      (a.ai_generated as boolean | undefined) ?? true,
+      (a.approved as boolean | undefined) ?? false,
     ]
   );
   return { success: true, hook_id: rows[0].id, created_at: rows[0].created_at };
@@ -747,6 +1137,7 @@ async function queryHooks(a: Args) {
   const niche_id = a.niche_id as number;
   const hook_type = a.hook_type as string | undefined;
   const target_avatar_id = a.target_avatar_id as number | undefined;
+  const approved = a.approved as boolean | undefined;
   const min_performance_score = a.min_performance_score as number | undefined;
 
   const params: unknown[] = [niche_id];
@@ -760,6 +1151,10 @@ async function queryHooks(a: Args) {
     params.push(target_avatar_id);
     filters.push(`target_avatar_id = $${params.length}`);
   }
+  if (approved != null) {
+    params.push(approved);
+    filters.push(`approved = $${params.length}`);
+  }
   if (min_performance_score != null) {
     params.push(min_performance_score);
     filters.push(`(performance_data->>'score')::numeric >= $${params.length}`);
@@ -768,14 +1163,27 @@ async function queryHooks(a: Args) {
   const where = filters.length ? ' AND ' + filters.join(' AND ') : '';
 
   const { rows } = await pool.query(
-    `SELECT id, niche_id, hook_text, hook_type, target_avatar_id,
-            source_insight_ids, performance_data, created_at
+    `SELECT id, niche_id, hook_text, hook_type, customer_language_quote,
+            target_avatar_id, source_insight_ids, usage_context,
+            performance_data, tags, ai_generated, approved, created_at
      FROM hooks_library
      WHERE niche_id = $1${where}
      ORDER BY created_at DESC`,
     params
   );
   return rows;
+}
+
+async function extractHooks(a: Args) {
+  return runHookExtractor(pool, a.niche_id as number);
+}
+
+async function extractOffers(a: Args) {
+  return runOfferExtractor(pool, a.niche_id as number);
+}
+
+async function extractStories(a: Args) {
+  return runStoryExtractor(pool, a.niche_id as number);
 }
 
 async function queryAllIntelligence(a: Args) {
@@ -803,6 +1211,213 @@ async function queryAllIntelligence(a: Args) {
   summary.instruction = 'Use specific query tools (query_insights, query_personas, etc) to fetch and synthesize data';
 
   return summary;
+}
+
+async function runRedditScraper(a: Args): Promise<ScriptResult> {
+  return spawnScript('run_full_scrape.py', [
+    '--niche-id', String(a.niche_id),
+    '--limit',    String((a.limit as number | undefined) ?? 50),
+    '--headless',
+    '--full-content',
+  ]);
+}
+
+async function runGoogleTrends(_a: Args): Promise<ScriptResult> {
+  return spawnScript('google_trends_scraper.py', []);
+}
+
+async function runYoutubeScraper(a: Args): Promise<ScriptResult> {
+  return spawnScript('youtube_scraper.py', [
+    '--niche-id', String(a.niche_id),
+    '--search',   (a.search as string | undefined) ?? 'exotic car rental',
+    '--limit',    String((a.limit as number | undefined) ?? 20),
+  ]);
+}
+
+async function runReviewScraper(a: Args): Promise<ScriptResult> {
+  return spawnScript('review_scraper.py', [
+    '--niche-id', String(a.niche_id),
+    '--platform', (a.platform as string | undefined) ?? 'trustpilot',
+    '--limit',    String((a.limit as number | undefined) ?? 50),
+  ]);
+}
+
+async function runFacebookScraper(a: Args): Promise<ScriptResult> {
+  return spawnScript('facebook_ad_scraper.py', [
+    '--niche-id',    String(a.niche_id),
+    '--competitors', a.competitors as string,
+    '--max-ads',     String((a.max_ads as number | undefined) ?? 50),
+    '--headless',
+  ]);
+}
+
+async function runLandingPageScraper(a: Args): Promise<ScriptResult> {
+  return spawnScript('landing_page_scraper.py', [
+    '--niche-id', String(a.niche_id),
+    '--limit',    String((a.limit as number | undefined) ?? 20),
+  ]);
+}
+
+async function browsePage(a: Args): Promise<ScriptResult> {
+  const args = ['--url', a.url as string];
+  if (a.wait_for) args.push('--wait-for', a.wait_for as string);
+  return spawnScript('browser_tool.py', args);
+}
+
+async function saveAuthoritySource(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO authority_sources
+       (firm_name, content_hubs, report_structure, tone_style, visual_design,
+        frameworks, paid_amplification, luxury_content, raw_notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     RETURNING id, created_at`,
+    [
+      a.firm_name,
+      toJson(a.content_hubs),
+      (a.report_structure as string | undefined) ?? null,
+      (a.tone_style as string | undefined) ?? null,
+      (a.visual_design as string | undefined) ?? null,
+      toJson(a.frameworks),
+      (a.paid_amplification as string | undefined) ?? null,
+      (a.luxury_content as string | undefined) ?? null,
+      (a.raw_notes as string | undefined) ?? null,
+    ]
+  );
+  return { success: true, id: rows[0].id, created_at: rows[0].created_at };
+}
+
+async function saveAssociation(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO association_intelligence
+       (name, acronym, website, geo_focus, vertical, citation_tier,
+        public_publications, monitor_urls, citation_use, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING id, created_at`,
+    [
+      a.name,
+      (a.acronym as string | undefined) ?? null,
+      (a.website as string | undefined) ?? null,
+      (a.geo_focus as string | undefined) ?? null,
+      (a.vertical as string | undefined) ?? null,
+      (a.citation_tier as number | undefined) ?? null,
+      toJson(a.public_publications),
+      toJson(a.monitor_urls),
+      (a.citation_use as string | undefined) ?? null,
+      (a.notes as string | undefined) ?? null,
+    ]
+  );
+  return { success: true, id: rows[0].id, created_at: rows[0].created_at };
+}
+
+async function saveAgencyBenchmark(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO agency_benchmarks
+       (agency_name, tier, website, headline_positioning, outcome_language,
+        proprietary_frameworks, pricing_signals, case_study_format, meta_ads, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING id, created_at`,
+    [
+      a.agency_name,
+      (a.tier as string | undefined) ?? null,
+      (a.website as string | undefined) ?? null,
+      (a.headline_positioning as string | undefined) ?? null,
+      (a.outcome_language as string | undefined) ?? null,
+      toJson(a.proprietary_frameworks),
+      (a.pricing_signals as string | undefined) ?? null,
+      (a.case_study_format as string | undefined) ?? null,
+      toJson(a.meta_ads),
+      (a.notes as string | undefined) ?? null,
+    ]
+  );
+  return { success: true, id: rows[0].id, created_at: rows[0].created_at };
+}
+
+async function runApexPositioning() {
+  return runApexPositioningBrain(pool);
+}
+
+async function runClientIntelligence(a: Args) {
+  return runClientIntelligenceBrain(
+    pool,
+    a.niche_id as number,
+    a.client_name as string | undefined,
+    a.city        as string | undefined,
+    (a.report_type as string | undefined) ?? 'state_of_market',
+  );
+}
+
+async function saveApexPositioningBrief(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO apex_positioning_briefs
+       (version, current_positioning, positioning_gaps, positioning_strengths,
+        positioning_opportunities, agency_comparisons, consulting_firm_comparisons,
+        methodology_recommendations, pricing_recommendations, packaging_recommendations,
+        proposal_language, citation_recommendations, report_format, tone_guidelines,
+        citation_style, framework_naming, visual_guidelines, raw_analysis)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+     RETURNING id, created_at`,
+    [
+      (a.version                     as string | undefined) ?? null,
+      a.current_positioning          as string,
+      toJson(a.positioning_gaps),
+      toJson(a.positioning_strengths),
+      toJson(a.positioning_opportunities),
+      toJson(a.agency_comparisons),
+      toJson(a.consulting_firm_comparisons),
+      (a.methodology_recommendations as string | undefined) ?? null,
+      (a.pricing_recommendations     as string | undefined) ?? null,
+      (a.packaging_recommendations   as string | undefined) ?? null,
+      toJson(a.proposal_language),
+      toJson(a.citation_recommendations),
+      (a.report_format               as string | undefined) ?? null,
+      (a.tone_guidelines             as string | undefined) ?? null,
+      (a.citation_style              as string | undefined) ?? null,
+      toJson(a.framework_naming),
+      (a.visual_guidelines           as string | undefined) ?? null,
+      (a.raw_analysis                as string | undefined) ?? null,
+    ]
+  );
+  return { success: true, id: rows[0].id, created_at: rows[0].created_at };
+}
+
+async function saveClientIntelligenceReport(a: Args) {
+  const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
+
+  const { rows } = await pool.query(
+    `INSERT INTO client_intelligence_reports
+       (niche_id, client_name, city, report_type, report_period,
+        positioning_brief_id, executive_summary, market_overview,
+        uhnw_persona_profiles, seasonality_data, competitor_ad_intelligence,
+        hooks_and_offers, citations, recommendations, full_report)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+     RETURNING id, created_at`,
+    [
+      a.niche_id,
+      (a.client_name             as string | undefined) ?? null,
+      (a.city                    as string | undefined) ?? null,
+      a.report_type              as string,
+      (a.report_period           as string | undefined) ?? null,
+      (a.positioning_brief_id    as number | undefined) ?? null,
+      (a.executive_summary       as string | undefined) ?? null,
+      (a.market_overview         as string | undefined) ?? null,
+      toJson(a.uhnw_persona_profiles),
+      toJson(a.seasonality_data),
+      toJson(a.competitor_ad_intelligence),
+      toJson(a.hooks_and_offers),
+      toJson(a.citations),
+      toJson(a.recommendations),
+      (a.full_report             as string | undefined) ?? null,
+    ]
+  );
+  return { success: true, id: rows[0].id, created_at: rows[0].created_at };
 }
 
 // ─── MCP Server ────────────────────────────────────────────────────────────────
@@ -836,9 +1451,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'save_offer':                 result = await saveOffer(a);                break;
       case 'save_financial_analysis':    result = await saveFinancialAnalysis(a);    break;
       case 'save_competitor_analysis':   result = await saveCompetitorAnalysis(a);   break;
+      case 'extract_hooks':               result = await extractHooks(a);             break;
+      case 'extract_stories':             result = await extractStories(a);           break;
+      case 'extract_offers':              result = await extractOffers(a);            break;
       case 'save_hook':                   result = await saveHook(a);                 break;
       case 'query_hooks':                 result = await queryHooks(a);               break;
       case 'query_all_intelligence':      result = await queryAllIntelligence(a);     break;
+      case 'run_reddit_scraper':          result = await runRedditScraper(a);         break;
+      case 'run_google_trends':           result = await runGoogleTrends(a);          break;
+      case 'run_youtube_scraper':         result = await runYoutubeScraper(a);        break;
+      case 'run_review_scraper':          result = await runReviewScraper(a);         break;
+      case 'run_facebook_scraper':        result = await runFacebookScraper(a);       break;
+      case 'run_landing_page_scraper':    result = await runLandingPageScraper(a);    break;
+      case 'browse_page':                 result = await browsePage(a);               break;
+      case 'save_authority_source':            result = await saveAuthoritySource(a);           break;
+      case 'save_association':                result = await saveAssociation(a);               break;
+      case 'save_agency_benchmark':           result = await saveAgencyBenchmark(a);           break;
+      case 'run_apex_positioning_brain':      result = await runApexPositioning();             break;
+      case 'run_client_intelligence_brain':   result = await runClientIntelligence(a);         break;
+      case 'save_apex_positioning_brief':     result = await saveApexPositioningBrief(a);      break;
+      case 'save_client_intelligence_report': result = await saveClientIntelligenceReport(a);  break;
       default:
         return {
           content: [{ type: 'text', text: `Unknown tool: ${name}` }],

@@ -29,6 +29,13 @@ Design positioned offers with: target persona, problem solved, unique value, pri
 - Factor in urgency/scarcity
 - Test pricing tiers if applicable
 
+## POSITIONING STANDARDS
+
+When designing offers, reference the following intelligence sources:
+- **`agency_benchmarks` pricing signals** — use documented agency rate structures to anchor pricing tiers and validate premium positioning
+- **Team One luxury positioning principles** — escape commodification by anchoring to identity and access, not price; establish pricing power through scarcity and social proof
+- **Hawke Media qualifier mechanic** — use fleet size and revenue brackets (e.g., 5+ vehicles, $250K+ ARR) as qualification gates to filter for high-value prospects and justify premium pricing tiers
+
 ## OUTPUT FORMAT
 JSON with: offer_name, offer_type, target_avatar, problem_solved, unique_value, pricing (suggested_price, price_rationale, competitor_pricing, willingness_to_pay_signals), market_timing, anticipated_objections
 

@@ -47,13 +47,14 @@ def get_db_connection():
     return psycopg2.connect(db_url)
 
 
-def is_duplicate(conn, source_url: str) -> bool:
+def get_existing_post(conn, source_url: str):
+    """Return (id, raw_data) if the post exists, else None."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT 1 FROM raw_source_data WHERE source_url = %s LIMIT 1",
+            "SELECT id, raw_data FROM raw_source_data WHERE source_url = %s LIMIT 1",
             (source_url,)
         )
-        return cur.fetchone() is not None
+        return cur.fetchone()
 
 
 def save_post(conn, post: dict, niche_id: int = 2):
@@ -78,6 +79,21 @@ def save_post(conn, post: dict, niche_id: int = 2):
                 'keyword': post.get('keyword', ''),
             }),
             json.dumps(post),
+        ))
+    conn.commit()
+
+
+def update_post_content(conn, row_id: int, post: dict):
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE raw_source_data
+               SET content  = %s,
+                   raw_data = %s
+             WHERE id = %s
+        """, (
+            post.get('selftext') or post.get('preview_text', ''),
+            json.dumps(post),
+            row_id,
         ))
     conn.commit()
 
@@ -379,15 +395,34 @@ async def scrape_reddit(args) -> dict:
                     continue
 
                 try:
-                    if is_duplicate(conn, url):
-                        logger.info(f"⏭️  Skipped duplicate: {title_short}")
-                        stats['duplicates'] += 1
+                    existing = get_existing_post(conn, url)
+                    if existing:
+                        row_id, existing_raw = existing
+                        # psycopg2 may return jsonb as dict or json/text as str
+                        if isinstance(existing_raw, str):
+                            existing_raw = json.loads(existing_raw)
+                        existing_raw = existing_raw or {}
+                        existing_selftext = existing_raw.get('selftext', '') or ''
+                        existing_comments = existing_raw.get('comments', []) or []
+                        logger.info(
+                            f"[dedup] id={row_id} "
+                            f"selftext={repr(existing_selftext[:60])} "
+                            f"comments_len={len(existing_comments)} "
+                            f"raw_type={type(existing_raw).__name__}"
+                        )
+                        if not existing_selftext.strip() and len(existing_comments) == 0:
+                            update_post_content(conn, row_id, post)
+                            logger.info(f"🔄 Updated (was empty): {title_short}")
+                            stats['new'] += 1
+                        else:
+                            logger.info(f"⏭️  Skipped duplicate: {title_short}")
+                            stats['duplicates'] += 1
                     else:
                         save_post(conn, post, niche_id)
                         logger.info(f"✅ Saved: {title_short}")
                         stats['new'] += 1
                 except Exception as exc:
-                    logger.error(f"❌ Save error: {exc}")
+                    logger.error(f"❌ Save error for {title_short}: {exc}", exc_info=True)
                     stats['errors'] += 1
 
         except Exception as exc:

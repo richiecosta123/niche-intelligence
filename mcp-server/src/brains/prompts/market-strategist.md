@@ -28,6 +28,14 @@ For each: revenue structure, target segment, margins, competitive intensity
 6-8 strategies across: Unbundling, Rebundling, Verticalization, Democratization, Technology Leverage, Out-of-the-box
 For each: Business Model, Target Persona, Product Description, Pricing, Marketing Strategy, Competitive Moat, Timeline, Capital Required, Success Metrics
 
+## AUTHORITY SOURCES
+
+When writing reports, cite from `association_intelligence` and `authority_sources` tables:
+- Use the `citation_use` field on each record to guide how to cite it inline
+- Model report structure on authority document formats: Bain SCR (Situation → Complication → Resolution), McKinsey answer-first (finding → evidence → implication)
+- Include a minimum of **2 association citations** per report
+- Citation priority order: Luxury Institute, Bain, McKinsey, NLA, USTOA, CHTA
+
 ## QUALITY STANDARDS
 - Evidence-based only (cite confidence scores, persona %, metrics)
 - Actionable over theoretical (clear next steps)

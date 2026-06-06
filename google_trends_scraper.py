@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-Google Trends scraper for the niche intelligence platform.
-- Reads keywords from niches.data_sources.googleTrends.keywords
-- Fetches interest over time, related queries, seasonality, trend direction
-- Saves to trend_data table
+Google Trends scraper — saves search volume and seasonality data to raw_source_data.
+Collects for 9 keywords: interest over time (52 weeks), interest by region (US states),
+and related queries (top + rising). Batches up to 5 keywords per request.
 """
 
-import argparse
 import json
 import logging
 import os
+import random
 import sys
 import time
-from datetime import datetime, timezone
+from urllib.parse import quote
 
 import psycopg2
 from dotenv import load_dotenv
@@ -28,7 +27,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TIMEFRAME = 'today 5-y'
+NICHE_ID = 1
+TIMEFRAME = 'today 12-m'
+BATCH_SIZE = 5
+
+PRIMARY_KEYWORDS = [
+    "exotic car rental",
+    "supercar rental",
+    "luxury car rental",
+    "lamborghini rental",
+    "ferrari rental",
+]
+SECONDARY_KEYWORDS = [
+    "turo exotic",
+    "rent exotic car",
+    "exotic car for a day",
+    "supercar experience",
+]
+ALL_KEYWORDS = PRIMARY_KEYWORDS + SECONDARY_KEYWORDS
 
 
 # ─── Database ─────────────────────────────────────────────────────────────────
@@ -40,297 +56,286 @@ def get_db_connection():
     return psycopg2.connect(db_url)
 
 
-def get_regions(conn, niche_id: int) -> list[str]:
+def is_duplicate(conn, source_id: str) -> bool:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT data_sources->'googleTrends'->'regions' FROM niches WHERE id = %s",
-            (niche_id,)
+            "SELECT 1 FROM raw_source_data WHERE source_id = %s AND source_type = 'google_trends' LIMIT 1",
+            (source_id,)
         )
-        row = cur.fetchone()
-    if not row or not row[0]:
-        return []
-    return json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        return cur.fetchone() is not None
 
 
-def get_keywords(conn, niche_id: int) -> list[str]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT data_sources->'googleTrends'->'keywords' FROM niches WHERE id = %s",
-            (niche_id,)
-        )
-        row = cur.fetchone()
-    if not row or not row[0]:
-        return []
-    return json.loads(row[0]) if isinstance(row[0], str) else row[0]
-
-
-def save_trend(conn, niche_id: int, keyword: str, geo: str, data_points: list,
-               trend_direction: str, trend_value: float,
-               seasonality: dict, related: list):
-    with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO trend_data
-                (niche_id, term, source, trend_value, trend_direction,
-                 geo, time_range, related_queries, breakdown, recorded_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            niche_id,
-            keyword,
-            'google_trends',
-            round(trend_value, 4),
-            trend_direction,
-            geo,
-            TIMEFRAME,
-            json.dumps(related),
-            json.dumps({'data_points': data_points, 'seasonality': seasonality}),
-            datetime.now(timezone.utc),
-        ))
-    conn.commit()
-
-
-# ─── Analysis helpers ──────────────────────────────────────────────────────────
-
-def detect_trend_direction(values: list[float]) -> str:
-    """Compare the average of the last 12 months vs the prior 12 months."""
-    if len(values) < 24:
-        return 'stable'
-    recent = sum(values[-12:]) / 12
-    prior = sum(values[-24:-12]) / 12
-    if prior == 0:
-        return 'stable'
-    change = (recent - prior) / prior
-    if change >= 0.15:
-        return 'rising'
-    if change <= -0.15:
-        return 'declining'
-    return 'stable'
-
-
-def detect_seasonality(data_points: list[dict]) -> dict:
-    """Find peak/low months and classify the seasonal pattern."""
-    from collections import defaultdict
-
-    monthly_avg: dict[int, list] = defaultdict(list)
-    for dp in data_points:
-        month = int(dp['date'][5:7])
-        monthly_avg[month].append(dp['value'])
-
-    avg_by_month = {m: sum(v) / len(v) for m, v in monthly_avg.items()}
-    if not avg_by_month:
-        return {'peakMonths': [], 'lowMonths': [], 'pattern': 'unknown'}
-
-    overall_avg = sum(avg_by_month.values()) / len(avg_by_month)
-    threshold = overall_avg * 0.15  # 15% above/below = notable
-
-    peak_months = sorted(
-        [m for m, v in avg_by_month.items() if v >= overall_avg + threshold],
-        key=lambda m: avg_by_month[m], reverse=True
-    )
-    low_months = sorted(
-        [m for m, v in avg_by_month.items() if v <= overall_avg - threshold],
-        key=lambda m: avg_by_month[m]
-    )
-
-    # Classify pattern
-    if not peak_months and not low_months:
-        pattern = 'evergreen'
-    elif len(peak_months) <= 2:
-        pattern = 'highly_seasonal'
-    elif len(peak_months) <= 4:
-        pattern = 'seasonal'
-    else:
-        pattern = 'mildly_seasonal'
-
-    month_names = ['Jan','Feb','Mar','Apr','May','Jun',
-                   'Jul','Aug','Sep','Oct','Nov','Dec']
-
-    return {
-        'peakMonths': [month_names[m - 1] for m in peak_months[:3]],
-        'lowMonths': [month_names[m - 1] for m in low_months[:3]],
-        'pattern': pattern,
+def save_record(conn, keyword: str, data_type: str, content_data: dict) -> bool:
+    source_id = f"{keyword}:{data_type}:{TIMEFRAME}"
+    source_url = f"https://trends.google.com/trends/explore?q={quote(keyword)}"
+    metadata = {
+        'data_type': data_type,
+        'keyword': keyword,
+        'date_range': TIMEFRAME,
+        'region': 'US',
     }
 
+    if is_duplicate(conn, source_id):
+        logger.info(f"   ⏭️  Duplicate — skipping {keyword} / {data_type}")
+        return False
 
-# ─── Scraper ──────────────────────────────────────────────────────────────────
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO raw_source_data
+                (niche_id, source_type, source_url, source_id, title,
+                 content, engagement_metrics)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            NICHE_ID,
+            'google_trends',
+            source_url,
+            source_id,
+            keyword,
+            json.dumps(content_data),
+            json.dumps(metadata),
+        ))
+    conn.commit()
+    return True
 
-def scrape_keyword(pytrends: TrendReq, keyword: str, geo: str) -> dict | None:
-    """Fetch all trend data for one keyword in a given geo. Returns None on failure."""
-    try:
-        pytrends.build_payload([keyword], timeframe=TIMEFRAME, geo=geo)
 
-        # Interest over time
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def retry_with_backoff(fn, max_retries=3, base_delay=30):
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = base_delay * (2 ** attempt) + random.uniform(0, 5)
+            logger.warning(f"   ⚠️  Attempt {attempt + 1} failed: {e}. Retrying in {wait:.0f}s...")
+            time.sleep(wait)
+
+
+def random_delay(min_s=5, max_s=10):
+    d = random.uniform(min_s, max_s)
+    logger.info(f"   ⏳ Waiting {d:.1f}s...")
+    time.sleep(d)
+
+
+def batches(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+
+# ─── Scraping phases ──────────────────────────────────────────────────────────
+
+def fetch_interest_over_time_and_related(pytrends: TrendReq, batch: list) -> tuple:
+    """One API call: interest_over_time + related_queries for up to 5 keywords."""
+    def do_request():
+        pytrends.build_payload(batch, timeframe=TIMEFRAME, geo='US')
         iot_df = pytrends.interest_over_time()
-        if iot_df.empty or keyword not in iot_df.columns:
-            logger.warning(f"   ⚠️  No interest data returned")
-            return None
-
-        data_points = [
-            {'date': str(date.date()), 'value': int(row[keyword])}
-            for date, row in iot_df.iterrows()
-            if not row.get('isPartial', False)
-        ]
-        if not data_points:
-            return None
-
-        values = [dp['value'] for dp in data_points]
-        trend_value = values[-1]  # most recent month's index value
-        trend_direction = detect_trend_direction(values)
-        seasonality = detect_seasonality(data_points)
-
-        # Related queries
         related_raw = pytrends.related_queries()
-        related: list[dict] = []
-        kw_data = related_raw.get(keyword, {})
+        return iot_df, related_raw
 
-        for qtype in ('rising', 'top'):
-            df = kw_data.get(qtype)
-            if df is not None and not df.empty:
-                for _, row in df.head(10).iterrows():
-                    related.append({
-                        'type': qtype,
-                        'query': row['query'],
-                        'value': str(row['value']),
-                    })
-
-        return {
-            'data_points': data_points,
-            'trend_value': trend_value,
-            'trend_direction': trend_direction,
-            'seasonality': seasonality,
-            'related': related,
-        }
-
-    except Exception as e:
-        logger.error(f"   ❌ Failed: {e}")
-        return None
+    return retry_with_backoff(do_request)
 
 
-def scrape_trends(niche_id: int, delay: int, geo: str, use_regions: bool):
-    stats: dict[str, int] = {}  # keyed by geo code → success count
-    errors = 0
+def fetch_interest_by_region(pytrends: TrendReq, keyword: str) -> object:
+    """Fetch US state-level data for a single keyword (independent 0-100 scale)."""
+    def do_request():
+        pytrends.build_payload([keyword], timeframe=TIMEFRAME, geo='US')
+        return pytrends.interest_by_region(resolution='REGION', inc_low_vol=True)
 
+    return retry_with_backoff(do_request)
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def run_scraper():
     try:
         conn = get_db_connection()
         logger.info("✅ Database connected")
     except Exception as e:
         logger.error(f"❌ DB connection failed: {e}")
-        return
-
-    keywords = get_keywords(conn, niche_id)
-    if not keywords:
-        logger.error(f"❌ No googleTrends keywords found for niche_id={niche_id}")
-        conn.close()
-        return
-
-    # Resolve regions list
-    if use_regions:
-        regions = get_regions(conn, niche_id)
-        if not regions:
-            logger.warning("⚠️  No regions configured in niche data_sources.googleTrends.regions — falling back to --geo")
-            regions = [geo]
-        else:
-            logger.info(f"🌎 Regions from config: {', '.join(regions)}")
-    else:
-        regions = [geo]
-
-    total_combinations = len(keywords) * len(regions)
-    logger.info(
-        f"📋 {len(keywords)} keywords × {len(regions)} region(s) = {total_combinations} records to fetch\n"
-    )
+        sys.exit(1)
 
     pytrends = TrendReq(hl='en-US', tz=360)
-    combo_index = 0
+    saved = {'interest_over_time': 0, 'interest_by_region': 0, 'related_queries': 0}
+    skipped = 0
+    errors = 0
 
-    for region in regions:
-        stats[region] = 0
-        logger.info(f"🌍 Starting region: {region}")
+    # ── Phase 1: interest over time + related queries ──────────────────────────
+    logger.info(f"\n{'='*60}")
+    logger.info("PHASE 1: Interest Over Time + Related Queries")
+    logger.info(f"{'='*60}")
 
-        for i, keyword in enumerate(keywords, 1):
-            combo_index += 1
-            logger.info(f"\n🔍 [{combo_index}/{total_combinations}] \"{keyword}\" | Region: {region}")
+    keyword_batches = list(batches(ALL_KEYWORDS, BATCH_SIZE))
+    for batch_idx, batch in enumerate(keyword_batches, 1):
+        logger.info(f"\n📦 Batch {batch_idx}/{len(keyword_batches)}: {batch}")
 
-            result = scrape_keyword(pytrends, keyword, region)
+        try:
+            iot_df, related_raw = fetch_interest_over_time_and_related(pytrends, batch)
+        except Exception as e:
+            logger.error(f"   ❌ Batch failed: {e}")
+            errors += len(batch)
+            if batch_idx < len(keyword_batches):
+                random_delay(10, 20)
+            continue
 
-            if result is None:
-                errors += 1
+        for keyword in batch:
+            # ── interest_over_time ──
+            if not iot_df.empty and keyword in iot_df.columns:
+                data_points = [
+                    {
+                        'date': str(date.date()),
+                        'search_value': int(row[keyword]),
+                        'is_partial': bool(row.get('isPartial', False)),
+                    }
+                    for date, row in iot_df.iterrows()
+                ]
+                ok = save_record(conn, keyword, 'interest_over_time', {
+                    'keyword': keyword,
+                    'timeframe': TIMEFRAME,
+                    'geo': 'US',
+                    'data_points': data_points,
+                    'point_count': len(data_points),
+                })
+                if ok:
+                    saved['interest_over_time'] += 1
+                    logger.info(f"   ✅ interest_over_time: {keyword} — {len(data_points)} weekly points")
+                else:
+                    skipped += 1
             else:
-                try:
-                    save_trend(
-                        conn,
-                        niche_id,
-                        keyword,
-                        region,
-                        result['data_points'],
-                        result['trend_direction'],
-                        result['trend_value'],
-                        result['seasonality'],
-                        result['related'],
-                    )
-                    direction_emoji = {'rising': '📈', 'declining': '📉', 'stable': '➡️'}.get(
-                        result['trend_direction'], '➡️'
-                    )
-                    logger.info(
-                        f"   ✅ Saved — {direction_emoji} {result['trend_direction']} | "
-                        f"value={result['trend_value']} | "
-                        f"pattern={result['seasonality']['pattern']} | "
-                        f"{len(result['related'])} related queries"
-                    )
-                    stats[region] += 1
-                except Exception as e:
-                    logger.error(f"   ❌ DB save failed: {e}")
-                    errors += 1
+                logger.warning(f"   ⚠️  No interest data for: {keyword}")
+                errors += 1
 
-            # Delay between every request except the last
-            if combo_index < total_combinations:
-                logger.info(f"   ⏳ Waiting {delay}s...")
-                time.sleep(delay)
+            # ── related_queries ──
+            queries: list = []
+            kw_data = related_raw.get(keyword, {})
+            for qtype in ('top', 'rising'):
+                df = kw_data.get(qtype)
+                if df is not None and not df.empty:
+                    for _, row in df.head(20).iterrows():
+                        queries.append({
+                            'query': row['query'],
+                            'query_type': qtype,
+                            'search_value': str(row['value']),
+                        })
 
-        logger.info(f"✅ Region {region} complete — {stats[region]}/{len(keywords)} saved\n")
+            if queries:
+                ok = save_record(conn, keyword, 'related_queries', {
+                    'keyword': keyword,
+                    'timeframe': TIMEFRAME,
+                    'geo': 'US',
+                    'queries': queries,
+                    'query_count': len(queries),
+                })
+                if ok:
+                    saved['related_queries'] += 1
+                    logger.info(f"   ✅ related_queries:    {keyword} — {len(queries)} queries")
+                else:
+                    skipped += 1
+            else:
+                logger.warning(f"   ⚠️  No related queries for: {keyword}")
+
+        if batch_idx < len(keyword_batches):
+            random_delay(5, 10)
+
+    # ── Phase 2: interest by region (per keyword, independent scale) ───────────
+    logger.info(f"\n{'='*60}")
+    logger.info("PHASE 2: Interest by Region (US States)")
+    logger.info(f"{'='*60}")
+
+    for kw_idx, keyword in enumerate(ALL_KEYWORDS, 1):
+        logger.info(f"\n[{kw_idx}/{len(ALL_KEYWORDS)}] {keyword}")
+
+        try:
+            region_df = fetch_interest_by_region(pytrends, keyword)
+        except Exception as e:
+            logger.error(f"   ❌ Failed: {e}")
+            errors += 1
+            if kw_idx < len(ALL_KEYWORDS):
+                random_delay(10, 20)
+            continue
+
+        if region_df.empty or keyword not in region_df.columns:
+            logger.warning(f"   ⚠️  No regional data returned")
+            errors += 1
+            if kw_idx < len(ALL_KEYWORDS):
+                random_delay(5, 10)
+            continue
+
+        regions = sorted(
+            [
+                {'region': str(name), 'search_value': int(row[keyword])}
+                for name, row in region_df.iterrows()
+                if int(row[keyword]) > 0
+            ],
+            key=lambda x: x['search_value'],
+            reverse=True,
+        )
+
+        ok = save_record(conn, keyword, 'interest_by_region', {
+            'keyword': keyword,
+            'timeframe': TIMEFRAME,
+            'geo': 'US',
+            'resolution': 'REGION',
+            'regions': regions,
+            'region_count': len(regions),
+        })
+        if ok:
+            saved['interest_by_region'] += 1
+            logger.info(f"   ✅ interest_by_region: {keyword} — {len(regions)} US states")
+        else:
+            skipped += 1
+
+        if kw_idx < len(ALL_KEYWORDS):
+            random_delay(5, 10)
 
     conn.close()
 
-    total_saved = sum(stats.values())
-    logger.info("📊 Summary by region:")
-    for region, count in stats.items():
-        logger.info(f"   {region}: {count} saved")
-    logger.info(
-        f"\n📊 Done — "
-        f"{len(keywords)} keywords × {len(regions)} regions = "
-        f"{total_saved} saved | {errors} errors"
-    )
+    # ── Summary ────────────────────────────────────────────────────────────────
+    total_saved = sum(saved.values())
+    logger.info(f"\n{'='*60}")
+    logger.info("SUMMARY")
+    logger.info(f"{'='*60}")
+    logger.info(f"  interest_over_time : {saved['interest_over_time']} rows")
+    logger.info(f"  related_queries    : {saved['related_queries']} rows")
+    logger.info(f"  interest_by_region : {saved['interest_by_region']} rows")
+    logger.info(f"  Total saved        : {total_saved}")
+    logger.info(f"  Skipped (dup)      : {skipped}")
+    logger.info(f"  Errors             : {errors}")
 
+    # ── DB verification ────────────────────────────────────────────────────────
+    try:
+        conn2 = get_db_connection()
+        with conn2.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    engagement_metrics->>'data_type' AS data_type,
+                    COUNT(*)                         AS count
+                FROM raw_source_data
+                WHERE niche_id = %s AND source_type = 'google_trends'
+                GROUP BY 1
+                ORDER BY 1
+            """, (NICHE_ID,))
+            rows = cur.fetchall()
+            cur.execute(
+                "SELECT COUNT(*) FROM raw_source_data WHERE niche_id = %s AND source_type = 'google_trends'",
+                (NICHE_ID,)
+            )
+            total_db = cur.fetchone()[0]
+        conn2.close()
 
-# ─── CLI ──────────────────────────────────────────────────────────────────────
-
-def main():
-    parser = argparse.ArgumentParser(
-        description='Google Trends scraper for niche intelligence platform'
-    )
-    parser.add_argument(
-        '--niche-id', type=int, default=1,
-        help='Niche ID to fetch keywords for (default: 1)'
-    )
-    parser.add_argument(
-        '--delay', type=int, default=2,
-        help='Seconds between requests to avoid rate limiting (default: 2)'
-    )
-    parser.add_argument(
-        '--geo', default='US',
-        help='Geographic target: country (US, GB, CA), state (US-CA), or metro (US-CA-803) (default: US)'
-    )
-    parser.add_argument(
-        '--regions', action='store_true',
-        help='Read target regions from niche config (data_sources.googleTrends.regions)'
-    )
-    args = parser.parse_args()
-
-    logger.info(
-        f"🚀 Google Trends Scraper — "
-        f"niche_id={args.niche_id}, geo={args.geo}, "
-        f"regions={'config' if args.regions else 'off'}, delay={args.delay}s"
-    )
-    scrape_trends(args.niche_id, args.delay, args.geo, args.regions)
+        logger.info(f"\n📊 Database verification (niche_id={NICHE_ID}, source_type=google_trends):")
+        for data_type, count in rows:
+            logger.info(f"   {data_type or 'null':<25} {count} rows")
+        logger.info(f"   {'TOTAL':<25} {total_db} rows")
+    except Exception as e:
+        logger.error(f"❌ Verification query failed: {e}")
 
 
 if __name__ == '__main__':
-    main()
+    logger.info("🚀 Google Trends Scraper")
+    logger.info(f"   Keywords : {len(ALL_KEYWORDS)} total "
+                f"({len(PRIMARY_KEYWORDS)} primary + {len(SECONDARY_KEYWORDS)} secondary)")
+    logger.info(f"   Timeframe: {TIMEFRAME} (weekly data)")
+    logger.info(f"   Data types: interest_over_time, interest_by_region, related_queries")
+    logger.info(f"   Target table: raw_source_data (niche_id={NICHE_ID})")
+    run_scraper()
