@@ -602,6 +602,46 @@ const TOOLS = [
     },
   },
   {
+    name: 'run_meta_ads_scraper',
+    description:
+      'Spawn the Meta Ads scraper to search Facebook Ad Library for agency_benchmarks and ' +
+      'authority_sources by name. Extracts ad copy, CTAs, formats, and landing page URLs. ' +
+      'Saves ad intelligence to agency_benchmarks.meta_ads (JSONB) and ' +
+      'authority_sources.paid_amplification (TEXT). Seeds landing_page_url_candidates into ' +
+      'raw_source_data for later scraping. Visible browser. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Which tables to scrape: agency | authority | all (default: all)',
+        },
+        limit: { type: 'number', description: 'Max rows to process (default: 50)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'run_google_ads_scraper',
+    description:
+      'Spawn the Google Ads Transparency Center scraper for agency_benchmarks and authority_sources. ' +
+      'Extracts ad headlines, descriptions, formats, and landing page URLs. ' +
+      'Merges results into agency_benchmarks.meta_ads (JSONB) and ' +
+      'authority_sources.paid_amplification (TEXT) — adds google_ads key without overwriting Meta data. ' +
+      'Seeds landing_page_url_candidates into raw_source_data. Visible browser. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Which tables to scrape: agency | authority | all (default: all)',
+        },
+        limit: { type: 'number', description: 'Max rows to process (default: 50)' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'browse_page',
     description:
       'Visit any URL with a headless Playwright browser, wait for JS to load, and return the full ' +
@@ -1258,6 +1298,20 @@ async function runLandingPageScraper(a: Args): Promise<ScriptResult> {
   ]);
 }
 
+async function runMetaAdsScraper(a: Args): Promise<ScriptResult> {
+  return spawnScript('meta_ads_scraper.py', [
+    '--type',  (a.type  as string | undefined) ?? 'all',
+    '--limit', String((a.limit as number | undefined) ?? 50),
+  ]);
+}
+
+async function runGoogleAdsScraper(a: Args): Promise<ScriptResult> {
+  return spawnScript('google_ads_scraper.py', [
+    '--type',  (a.type  as string | undefined) ?? 'all',
+    '--limit', String((a.limit as number | undefined) ?? 50),
+  ]);
+}
+
 async function browsePage(a: Args): Promise<ScriptResult> {
   const args = ['--url', a.url as string];
   if (a.wait_for) args.push('--wait-for', a.wait_for as string);
@@ -1463,6 +1517,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'run_review_scraper':          result = await runReviewScraper(a);         break;
       case 'run_facebook_scraper':        result = await runFacebookScraper(a);       break;
       case 'run_landing_page_scraper':    result = await runLandingPageScraper(a);    break;
+      case 'run_meta_ads_scraper':        result = await runMetaAdsScraper(a);        break;
+      case 'run_google_ads_scraper':      result = await runGoogleAdsScraper(a);      break;
       case 'browse_page':                 result = await browsePage(a);               break;
       case 'save_authority_source':            result = await saveAuthoritySource(a);           break;
       case 'save_association':                result = await saveAssociation(a);               break;

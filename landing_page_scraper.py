@@ -133,6 +133,28 @@ def get_pending_urls(conn, niche_id: int, limit: int) -> list[dict]:
                 })
                 scraped.add(url)
 
+        # 4. raw_source_data — landing page URL candidates seeded by meta/google ad scrapers
+        cur.execute(
+            """
+            SELECT id, source_url, title
+            FROM raw_source_data
+            WHERE source_type = 'landing_page_url_candidate'
+              AND source_url IS NOT NULL
+              AND source_url != ''
+            ORDER BY id DESC
+            """
+        )
+        for row in cur.fetchall():
+            url = normalize(row[1])
+            if url not in scraped:
+                pending.append({
+                    'url': url,
+                    'label': row[2] or url,
+                    'source_table': 'raw_source_data',
+                    'source_id': row[0],
+                })
+                scraped.add(url)
+
     return pending[:limit]
 
 
