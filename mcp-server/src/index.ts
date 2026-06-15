@@ -602,6 +602,54 @@ const TOOLS = [
     },
   },
   {
+    name: 'seed_newsletter_urls',
+    description:
+      'Seed newsletter article links into raw_source_data as source_type=newsletter_pending ' +
+      'for later scraping by run_email_intelligence_scraper. Sender/subject/date metadata is ' +
+      'stored in engagement_metrics. Skips URLs that already exist in raw_source_data ' +
+      '(any source_type) for this niche.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to seed newsletter URLs for' },
+        urls: {
+          type: 'array',
+          description: 'Links extracted from newsletter emails',
+          items: {
+            type: 'object' as const,
+            properties: {
+              url: { type: 'string', description: 'Article/destination URL from the newsletter' },
+              source_sender: { type: 'string', description: 'Sender name or email address of the newsletter' },
+              source_subject: { type: 'string', description: 'Subject line of the newsletter email' },
+              source_date: { type: 'string', description: 'Date the newsletter was received (ISO 8601)' },
+            },
+            required: ['url'],
+          },
+        },
+      },
+      required: ['niche_id', 'urls'],
+    },
+  },
+  {
+    name: 'run_email_intelligence_scraper',
+    description:
+      'Spawn the email intelligence scraper to visit newsletter URLs seeded via ' +
+      'seed_newsletter_urls (source_type=newsletter_pending) and extract article title, ' +
+      'body text, and publish date. Saves successes as source_type=newsletter and ' +
+      'failures (paywall/blocked/timeout) as source_type=newsletter_failed. ' +
+      'Visible browser by default. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to scrape newsletter URLs for' },
+        limit: { type: 'number', description: 'Max URLs to visit (default: 20)' },
+        batch: { type: 'number', description: 'Pause longer after every N URLs (default: 5)' },
+        headless: { type: 'boolean', description: 'Run browser headless (default: false)' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
     name: 'run_meta_ads_scraper',
     description:
       'Spawn the Meta Ads scraper to search Facebook Ad Library for agency_benchmarks and ' +
@@ -811,6 +859,59 @@ const TOOLS = [
 // ─── Handlers ──────────────────────────────────────────────────────────────────
 
 type Args = Record<string, unknown>;
+
+// Matches normalize_url() in landing_page_scraper.py
+function normalizeUrl(u: string): string {
+  return u.startsWith('http') ? u : `https://${u}`;
+}
+
+async function seedNewsletterUrls(a: Args) {
+  const niche_id = a.niche_id as number;
+  const urls = (a.urls as Array<Record<string, unknown>> | undefined) ?? [];
+
+  const { rows: existing } = await pool.query<{ source_url: string }>(
+    `SELECT source_url FROM raw_source_data WHERE niche_id = $1 AND source_url IS NOT NULL`,
+    [niche_id]
+  );
+  const seen = new Set(existing.map((r) => normalizeUrl(r.source_url)));
+
+  let inserted = 0;
+  let skipped = 0;
+
+  for (const item of urls) {
+    const rawUrl = item.url as string | undefined;
+    if (!rawUrl) {
+      skipped++;
+      continue;
+    }
+    const url = normalizeUrl(rawUrl);
+
+    if (seen.has(url)) {
+      skipped++;
+      continue;
+    }
+    seen.add(url);
+
+    await pool.query(
+      `INSERT INTO raw_source_data
+         (niche_id, source_type, source_url, title, engagement_metrics)
+       VALUES ($1, 'newsletter_pending', $2, $3, $4)`,
+      [
+        niche_id,
+        url,
+        (item.source_subject as string | undefined) ?? null,
+        JSON.stringify({
+          sender: (item.source_sender as string | undefined) ?? null,
+          subject: (item.source_subject as string | undefined) ?? null,
+          date: (item.source_date as string | undefined) ?? null,
+        }),
+      ]
+    );
+    inserted++;
+  }
+
+  return { inserted, skipped_duplicates: skipped, total: urls.length };
+}
 
 async function queryRawPosts(a: Args) {
   const niche_id = a.niche_id as number;
@@ -1298,6 +1399,16 @@ async function runLandingPageScraper(a: Args): Promise<ScriptResult> {
   ]);
 }
 
+async function runEmailIntelligenceScraper(a: Args): Promise<ScriptResult> {
+  const args = [
+    '--niche-id', String(a.niche_id),
+    '--limit',    String((a.limit as number | undefined) ?? 20),
+    '--batch',    String((a.batch as number | undefined) ?? 5),
+  ];
+  if (a.headless) args.push('--headless');
+  return spawnScript('email_intelligence_scraper.py', args);
+}
+
 async function runMetaAdsScraper(a: Args): Promise<ScriptResult> {
   return spawnScript('meta_ads_scraper.py', [
     '--type',  (a.type  as string | undefined) ?? 'all',
@@ -1517,6 +1628,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'run_review_scraper':          result = await runReviewScraper(a);         break;
       case 'run_facebook_scraper':        result = await runFacebookScraper(a);       break;
       case 'run_landing_page_scraper':    result = await runLandingPageScraper(a);    break;
+      case 'seed_newsletter_urls':        result = await seedNewsletterUrls(a);       break;
+      case 'run_email_intelligence_scraper': result = await runEmailIntelligenceScraper(a); break;
       case 'run_meta_ads_scraper':        result = await runMetaAdsScraper(a);        break;
       case 'run_google_ads_scraper':      result = await runGoogleAdsScraper(a);      break;
       case 'browse_page':                 result = await browsePage(a);               break;

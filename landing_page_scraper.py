@@ -39,6 +39,16 @@ USER_AGENTS = [
 RE_PRICE = re.compile(r'\$[\d,]+(?:\.\d{2})?(?:\s*/\s*(?:day|night|week|month|hr|hour))?', re.IGNORECASE)
 
 
+# ─── Shared utilities ──────────────────────────────────────────────────────────
+
+def normalize_url(u: str) -> str:
+    return u if u.startswith('http') else 'https://' + u
+
+
+async def random_delay(min_s: float = 2.0, max_s: float = 4.0):
+    await asyncio.sleep(random.uniform(min_s, max_s))
+
+
 # ─── Database ─────────────────────────────────────────────────────────────────
 
 def get_db_connection():
@@ -66,9 +76,6 @@ def get_pending_urls(conn, niche_id: int, limit: int) -> list[dict]:
 
         pending: list[dict] = []
 
-        def normalize(u: str) -> str:
-            return u if u.startswith('http') else 'https://' + u
-
         # 1. competitor_ad_data — scoped to niche_id
         cur.execute(
             """
@@ -83,7 +90,7 @@ def get_pending_urls(conn, niche_id: int, limit: int) -> list[dict]:
             (niche_id,),
         )
         for row in cur.fetchall():
-            url = normalize(row[2])
+            url = normalize_url(row[2])
             if url not in scraped:
                 pending.append({
                     'url': url,
@@ -103,7 +110,7 @@ def get_pending_urls(conn, niche_id: int, limit: int) -> list[dict]:
             """
         )
         for row in cur.fetchall():
-            url = normalize(row[2])
+            url = normalize_url(row[2])
             if url not in scraped:
                 pending.append({
                     'url': url,
@@ -123,7 +130,7 @@ def get_pending_urls(conn, niche_id: int, limit: int) -> list[dict]:
             """
         )
         for row in cur.fetchall():
-            url = normalize(row[2])
+            url = normalize_url(row[2])
             if url not in scraped:
                 pending.append({
                     'url': url,
@@ -145,7 +152,7 @@ def get_pending_urls(conn, niche_id: int, limit: int) -> list[dict]:
             """
         )
         for row in cur.fetchall():
-            url = normalize(row[1])
+            url = normalize_url(row[1])
             if url not in scraped:
                 pending.append({
                     'url': url,
@@ -362,7 +369,7 @@ async def scrape(niche_id: int, limit: int, headless: bool):
                 stats['errors'] += 1
 
             if i < len(pending):
-                await asyncio.sleep(random.uniform(3.0, 5.0))
+                await random_delay(3.0, 5.0)
 
         await browser.close()
 
