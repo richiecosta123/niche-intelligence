@@ -650,6 +650,23 @@ const TOOLS = [
     },
   },
   {
+    name: 'run_magazine_discovery_scraper',
+    description:
+      'Spawn the magazine discovery scraper to visit configured trade-magazine source pages ' +
+      '(Auto Rental News homepage, Luxury Daily automotive category) and extract candidate ' +
+      'article links/headlines. New URLs (not already in raw_source_data for this niche, any ' +
+      'source_type) are inserted as source_type=newsletter_pending for later scraping by ' +
+      'run_email_intelligence_scraper. Visible browser by default. Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to discover and tag new articles for' },
+        headless: { type: 'boolean', description: 'Run browser headless (default: false)' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
     name: 'run_meta_ads_scraper',
     description:
       'Spawn the Meta Ads scraper to search Facebook Ad Library for agency_benchmarks and ' +
@@ -1409,6 +1426,12 @@ async function runEmailIntelligenceScraper(a: Args): Promise<ScriptResult> {
   return spawnScript('email_intelligence_scraper.py', args);
 }
 
+async function runMagazineDiscoveryScraper(a: Args): Promise<ScriptResult> {
+  const args = ['--niche-id', String(a.niche_id)];
+  if (a.headless) args.push('--headless');
+  return spawnScript('magazine_discovery_scraper.py', args);
+}
+
 async function runMetaAdsScraper(a: Args): Promise<ScriptResult> {
   return spawnScript('meta_ads_scraper.py', [
     '--type',  (a.type  as string | undefined) ?? 'all',
@@ -1630,6 +1653,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'run_landing_page_scraper':    result = await runLandingPageScraper(a);    break;
       case 'seed_newsletter_urls':        result = await seedNewsletterUrls(a);       break;
       case 'run_email_intelligence_scraper': result = await runEmailIntelligenceScraper(a); break;
+      case 'run_magazine_discovery_scraper': result = await runMagazineDiscoveryScraper(a); break;
       case 'run_meta_ads_scraper':        result = await runMetaAdsScraper(a);        break;
       case 'run_google_ads_scraper':      result = await runGoogleAdsScraper(a);      break;
       case 'browse_page':                 result = await browsePage(a);               break;
