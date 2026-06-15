@@ -159,9 +159,44 @@ async def extract_publish_date(page) -> str:
     return ''
 
 
+async def extract_title(page) -> str:
+    """Prefer og:title, then first <h1> inside <article>/<main>, then <title>."""
+    try:
+        meta_el = await page.query_selector('meta[property="og:title"]')
+        if meta_el:
+            content = (await meta_el.get_attribute('content') or '').strip()
+            if content:
+                return content
+    except Exception:
+        pass
+
+    for selector in ('article h1', 'main h1'):
+        try:
+            el = await page.query_selector(selector)
+            if el:
+                text = await safe_text(el)
+                if text:
+                    return text
+        except Exception:
+            continue
+
+    return await page.title() or ''
+
+
+def is_cloudflare_challenge(extracted: dict) -> bool:
+    """Detect a Cloudflare 'Just a moment...' interstitial that slipped past
+    the HTTP status / networkidle checks."""
+    title = (extracted['title'] or '').strip()
+    if 'Just a moment' in title:
+        return True
+    if len(extracted['content']) < 500 and not extracted['publish_date']:
+        return True
+    return False
+
+
 async def extract_article(page) -> dict:
     """Extract title, main article text, and publish date from the current page."""
-    title = await page.title() or ''
+    title = await extract_title(page)
 
     content = ''
     for selector in ('article', 'main'):
@@ -210,12 +245,6 @@ async def scrape(niche_id: int, limit: int, batch_size: int, headless: bool, tes
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless)
-        context = await browser.new_context(
-            user_agent=random.choice(USER_AGENTS),
-            viewport={'width': 1280, 'height': 900},
-            java_script_enabled=True,
-        )
-        page = await context.new_page()
 
         for i, item in enumerate(pending, 1):
             url = item['url']
@@ -223,15 +252,33 @@ async def scrape(niche_id: int, limit: int, batch_size: int, headless: bool, tes
             metrics = item['engagement_metrics']
             logger.info(f"[{i}/{len(pending)}] id={row_id} — {url[:80]}")
 
+            # Fresh context per URL — a shared session accumulates cookies/fingerprint
+            # signals that some sites (e.g. Cloudflare) use to escalate to a 403
+            # on the 2nd+ request.
+            context = await browser.new_context(
+                user_agent=random.choice(USER_AGENTS),
+                viewport={'width': 1280, 'height': 900},
+                java_script_enabled=True,
+            )
+            page = await context.new_page()
+
             try:
                 response = await page.goto(url, wait_until='domcontentloaded', timeout=20_000)
-                await page.wait_for_timeout(1500)
 
                 if response is not None and response.status >= 400:
                     raise ValueError(f"HTTP {response.status}")
 
+                try:
+                    await page.wait_for_load_state('networkidle', timeout=10_000)
+                except PlaywrightTimeoutError:
+                    pass
+                await random_delay(2.0, 3.0)
+
                 extracted = await extract_article(page)
                 content_len = len(extracted['content'])
+
+                if is_cloudflare_challenge(extracted):
+                    raise ValueError('cloudflare_challenge')
 
                 if content_len < MIN_CONTENT_CHARS:
                     raise ValueError(
@@ -266,13 +313,15 @@ async def scrape(niche_id: int, limit: int, batch_size: int, headless: bool, tes
                 if not test:
                     save_failure(conn, row_id, metrics, reason)
                 stats['failed'] += 1
+            finally:
+                await context.close()
 
             if i < len(pending):
                 if i % batch_size == 0:
                     logger.info(f"  [batch {i // batch_size}] pausing...")
-                    await random_delay(5.0, 8.0)
+                    await random_delay(20.0, 30.0)
                 else:
-                    await random_delay(2.0, 4.0)
+                    await random_delay(8.0, 15.0)
 
         await browser.close()
 
