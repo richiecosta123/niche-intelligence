@@ -117,6 +117,15 @@ Note also `success_stories` (created by `migrate.ts`) and `stories_library` (wha
 
 **If you're setting this up from scratch**, plan to write `CREATE TABLE` statements for the 9 missing tables yourself. Cross-check `SCHEMA.md`'s column descriptions against actual usage in `index.ts` (search for `INSERT INTO`/`UPDATE` on each table name) before trusting it exactly, since the doc may have drifted too.
 
+### Tagging convention
+
+`insights.tags` is a plain `text[]` column with no enum or check constraint — nothing in the schema enforces tag values. The one place that actually depends on specific tag values is `apex-positioning.ts`'s `gatherSources()`, which filters `insights` with `tags && ARRAY[...]` against a hardcoded list. Anything saved via `save_insight` that's meant to feed the Apex Positioning Brain's `research_intelligence` slice must use these tags exactly, or it will silently be excluded from that query:
+
+- **Consulting firms** (market/trend/consumer-behavior analysis): tag with `"consulting"` plus the firm name — `"mckinsey"`, `"bcg"`, `"bain_co"`, `"deloitte"`.
+- **PE firms** (investment signals, capital flow, sector bets): tag with `"pe_firm"` plus the firm name — `"bain_capital"`, `"kkr"`, `"blackstone"`, `"apollo"`.
+
+Example: an insight summarizing a BCG automotive report should be saved with `tags: ["consulting", "bcg"]`; an insight about a KKR portfolio move should be `tags: ["pe_firm", "kkr"]`. Note `"bain_co"` (the consulting firm, Bain & Company) and `"bain_capital"` (the PE firm) are deliberately distinct tags — they are different organizations and the brain treats consulting signals ("what the market is doing") and PE signals ("where smart money thinks the market is going") as separate signal types.
+
 ---
 
 ## Python scrapers
@@ -274,7 +283,7 @@ None of these call an LLM or save anything themselves — that's left to the cal
 | `extract_hooks` | `niche_id`* | Pulls up to 60 competitor ads, 120 raw posts, 100 `language_pattern` insights, 50 stories; dedupes against existing `hooks_library` rows; returns data + prompt for the calling Claude to extract hooks and call `save_hook`. |
 | `extract_offers` | `niche_id`* | Same pattern, sourced from ads/posts/insights (`competitor_gap`, `market_timing`, `buying_trigger`, `pain_point`)/success stories; targets `save_offer`. |
 | `extract_stories` | `niche_id`* | Same pattern across ads, posts (reddit/youtube/google_news/trustpilot/forum), and all insight types; targets `save_success_story`. |
-| `run_apex_positioning_brain` | none | Gathers Apex's own scraped site content plus all `agency_benchmarks`, `authority_sources`, `association_intelligence` rows; returns data + prompt; targets `save_apex_positioning_brief`. |
+| `run_apex_positioning_brain` | none | Gathers Apex's own scraped site content, all `agency_benchmarks`/`authority_sources`/`association_intelligence` rows, and up to 30 `insights` tagged with a consulting- or PE-firm tag (see [Tagging convention](#tagging-convention)); returns data + a 3-step instruction (browse consulting/PE sites and save findings first, then analyze, then save) + prompt; targets `save_apex_positioning_brief`. |
 | `run_client_intelligence_brain` | `niche_id`*, `client_name`, `city`, `report_type` (default state_of_market) | Gathers the latest Apex positioning brief plus a wide slice of niche intelligence (insights, personas, stories, hooks, offers, trends, competitor ads, disruption reports); returns data + prompt; targets `save_client_intelligence_report`. |
 
 **Instruction-only — these never touch the DB, they just hand back a system prompt + a to-do list of `query_*`/`save_*` tools for the calling Claude to use (6)**
@@ -335,6 +344,19 @@ The 6 brains wired in this pass (`competitive-intelligence.ts`, `conversational-
 | `research-analyst.ts` | **Stub** | `npx tsx mcp-server/src/run.ts research_analyst --niche-id <id>` returns `{status: 'stub — not yet implemented'}` and nothing else. Not in the MCP server. |
 
 Of the 14 brains, 11 load a system prompt from `mcp-server/src/brains/prompts/*.md`. `apex-positioning.ts`, `client-intelligence.ts`, and the stub `research-analyst.ts` do not.
+
+---
+
+## Weekly intelligence cadence
+
+This is the recurring flow `run_apex_positioning_brain` is built around — there's no scheduler or cron job that runs it; it's intended to be triggered manually (e.g. weekly) by asking Claude to run it.
+
+1. **Call `run_apex_positioning_brain`.** It queries Apex's own scraped pages, `agency_benchmarks`, `authority_sources`, `association_intelligence`, and up to 30 `insights` rows already tagged as consulting/PE intelligence (see [Tagging convention](#tagging-convention)), and returns all of that plus a 3-step instruction.
+2. **Step 1 of that instruction — gather fresh intelligence first.** The calling Claude is told to `browse_page` a fixed list of consulting-firm and PE-firm sites (BCG, Bain & Company, Deloitte automotive pages; Bain Capital, KKR, Blackstone, Apollo insights/news pages — McKinsey is sourced from Gmail under `label:apex-intel` instead of a URL) and `save_insight` anything relevant, tagged per the convention above. This is a manual step performed by whichever Claude session is running the brain that turn — there's no scraper or automation for these specific sites/sources.
+3. **Step 2 — analyze.** Using agency benchmarks, authority sources, and the consulting+PE `research_intelligence` (now including whatever was just saved in step 1, since `gatherSources()` re-queries `insights` at call time), the calling Claude identifies positioning strengths, gaps, and opportunities for Apex — explicitly treating consulting signals ("what the market is doing") and PE signals ("where smart money thinks the market is going") as distinct.
+4. **Step 3 — save.** The result is saved via `save_apex_positioning_brief`, becoming the latest row in `apex_positioning_briefs` — which is exactly what `run_client_intelligence_brain` later pulls as its "style guide" when generating a client report (see `client-intelligence.ts`).
+
+Because step 1 depends on a human/Claude actually visiting those sites and tagging correctly, the quality of this whole cadence is bottlenecked on tagging discipline — there's no validation anywhere in the schema or code that catches a mistagged or untagged insight.
 
 ---
 
