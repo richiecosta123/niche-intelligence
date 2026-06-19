@@ -13,6 +13,12 @@ import { runStoryExtractor } from './brains/story-extractor.js';
 import { runOfferExtractor } from './brains/offer-extractor.js';
 import { runApexPositioningBrain } from './brains/apex-positioning.js';
 import { runClientIntelligenceBrain } from './brains/client-intelligence.js';
+import { competitiveIntelligenceTool } from './brains/competitive-intelligence.js';
+import { conversationalAssistantTool } from './brains/conversational-assistant.js';
+import { copywriterTool } from './brains/copywriter.js';
+import { financialAnalystTool } from './brains/financial-analyst.js';
+import { offerDesignerTool } from './brains/offer-designer.js';
+import { personaArchitectTool } from './brains/persona-architect.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -871,6 +877,97 @@ const TOOLS = [
       required: ['niche_id', 'report_type'],
     },
   },
+  {
+    name: 'competitive_intelligence',
+    description:
+      'Competitive Intelligence Brain: dissects named competitors for a niche to find weaknesses ' +
+      'and actionable gaps. Query query_insights (competitor_gap), query_success_stories, and ' +
+      'query_personas first, then analyse each competitor and save one record per competitor via ' +
+      'save_competitor_analysis.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to analyse competitors for' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'conversational_assistant',
+    description:
+      'Conversational Assistant Brain: returns a system prompt and a map of which query tools to call ' +
+      '(query_insights, query_personas, query_success_stories, query_all_intelligence, etc.) for a given ' +
+      'query type, so the calling Claude can synthesise a cited, actionable answer. Does not save anything.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to query' },
+        query_type: {
+          type: 'string',
+          description:
+            'What the user wants: pain_points | personas | opportunities | offers | ' +
+            'financials | competitors | copy | comprehensive',
+        },
+      },
+      required: ['niche_id', 'query_type'],
+    },
+  },
+  {
+    name: 'copywriter',
+    description:
+      'Copywriter Brain: builds a marketing copy asset library from authentic customer language. ' +
+      'Query query_insights (language_pattern), query_personas, and query_success_stories first, then ' +
+      'generate copy assets and save each via save_marketing_copy.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to generate copy for' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'financial_analyst',
+    description:
+      'Financial Analyst Brain: calculates TAM, CAC, LTV, payback period, and unit economics to ' +
+      'validate market opportunities. Query query_insights, query_success_stories, and any available ' +
+      'trend data first, then save results via save_financial_analysis.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to analyse' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'offer_designer',
+    description:
+      'Offer Designer Brain: designs 2-3 positioned offers per niche anchored to customer pain points ' +
+      'and market gaps. Query query_personas, query_insights, and query_success_stories first, then ' +
+      'save each designed offer via save_offer.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to design offers for' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'persona_architect',
+    description:
+      'Persona Architect Brain: builds 8-12 psychologically rich customer personas from raw community ' +
+      'data. Audit raw_source_data, call expand_research to fill gaps, then save each persona ' +
+      'immediately (one at a time, not batched) via save_persona.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to generate personas for' },
+      },
+      required: ['niche_id'],
+    },
+  },
 ];
 
 // ─── Handlers ──────────────────────────────────────────────────────────────────
@@ -1540,6 +1637,33 @@ async function runClientIntelligence(a: Args) {
   );
 }
 
+async function runCompetitiveIntelligence(a: Args) {
+  return competitiveIntelligenceTool.handler({ nicheId: a.niche_id as number });
+}
+
+async function runConversationalAssistant(a: Args) {
+  return conversationalAssistantTool.handler({
+    nicheId: a.niche_id as number,
+    queryType: a.query_type as string,
+  });
+}
+
+async function runCopywriter(a: Args) {
+  return copywriterTool.handler({ nicheId: a.niche_id as number });
+}
+
+async function runFinancialAnalyst(a: Args) {
+  return financialAnalystTool.handler({ nicheId: a.niche_id as number });
+}
+
+async function runOfferDesigner(a: Args) {
+  return offerDesignerTool.handler({ nicheId: a.niche_id as number });
+}
+
+async function runPersonaArchitect(a: Args) {
+  return personaArchitectTool.handler({ nicheId: a.niche_id as number });
+}
+
 async function saveApexPositioningBrief(a: Args) {
   const toJson = (v: unknown) => (v != null ? JSON.stringify(v) : null);
 
@@ -1662,6 +1786,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'save_agency_benchmark':           result = await saveAgencyBenchmark(a);           break;
       case 'run_apex_positioning_brain':      result = await runApexPositioning();             break;
       case 'run_client_intelligence_brain':   result = await runClientIntelligence(a);         break;
+      case 'competitive_intelligence':        result = await runCompetitiveIntelligence(a);    break;
+      case 'conversational_assistant':        result = await runConversationalAssistant(a);    break;
+      case 'copywriter':                      result = await runCopywriter(a);                 break;
+      case 'financial_analyst':               result = await runFinancialAnalyst(a);           break;
+      case 'offer_designer':                  result = await runOfferDesigner(a);              break;
+      case 'persona_architect':               result = await runPersonaArchitect(a);           break;
       case 'save_apex_positioning_brief':     result = await saveApexPositioningBrief(a);      break;
       case 'save_client_intelligence_report': result = await saveClientIntelligenceReport(a);  break;
       default:
@@ -1681,4 +1811,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('Niche Intelligence MCP v1.0.0 — FULL PLATFORM: all 9 brains operational');
+console.error(`Niche Intelligence MCP v1.0.0 — ${TOOLS.length} tools registered`);
