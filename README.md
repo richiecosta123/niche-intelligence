@@ -167,6 +167,7 @@ All live at the repo root. All connect to Postgres with `psycopg2`/`NEON_DB_URL`
 - **Run:** `python3 google_trends_scraper.py`
 - **Flags:** none. `NICHE_ID` is hardcoded to `1` in the script — the `niche_id` parameter on the corresponding MCP tool (`run_google_trends`) is accepted but has no effect on what the script actually does.
 - **Writes to:** `raw_source_data` (`source_type='google_trends'`), 3 rows per keyword (one each for interest-over-time, related queries, regional interest). Has retry/backoff and a post-run DB verification query.
+- **Refresh window:** dedupes on `source_id` (`{keyword}:{data_type}:{timeframe}`), but it's a 30-day refresh, not a permanent skip — if the existing row's `collected_at` is under 30 days old it's skipped as before; once it's 30+ days old, running the script `UPDATE`s that row's `content`/`collected_at` in place instead of inserting a new one. Row count per keyword/data-type combination never grows past 1, and data quietly goes stale if the script isn't re-run roughly monthly.
 
 #### `forum_scraper.py`
 - **Does:** Scrapes 3 hardcoded forums — Fastlane Forum, Warrior Forum, FerrariChat — using hardcoded search queries, with dual extraction strategies per forum (XenForo-specific + generic vBulletin fallback).

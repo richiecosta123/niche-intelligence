@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 NICHE_ID = 1
 TIMEFRAME = 'today 12-m'
 BATCH_SIZE = 5
+REFRESH_AFTER_DAYS = 30
 
 PRIMARY_KEYWORDS = [
     "exotic car rental",
@@ -56,13 +57,21 @@ def get_db_connection():
     return psycopg2.connect(db_url)
 
 
-def is_duplicate(conn, source_id: str) -> bool:
+def get_existing_status(conn, source_id: str):
+    """None = no existing row. True = existing row is stale (>= REFRESH_AFTER_DAYS old,
+    needs refresh). False = existing row is still fresh (skip)."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT 1 FROM raw_source_data WHERE source_id = %s AND source_type = 'google_trends' LIMIT 1",
-            (source_id,)
+            """
+            SELECT collected_at < NOW() - (%s * INTERVAL '1 day')
+            FROM raw_source_data
+            WHERE source_id = %s AND source_type = 'google_trends'
+            LIMIT 1
+            """,
+            (REFRESH_AFTER_DAYS, source_id)
         )
-        return cur.fetchone() is not None
+        row = cur.fetchone()
+        return row[0] if row else None
 
 
 def save_record(conn, keyword: str, data_type: str, content_data: dict) -> bool:
@@ -75,9 +84,25 @@ def save_record(conn, keyword: str, data_type: str, content_data: dict) -> bool:
         'region': 'US',
     }
 
-    if is_duplicate(conn, source_id):
-        logger.info(f"   ⏭️  Duplicate — skipping {keyword} / {data_type}")
+    is_stale = get_existing_status(conn, source_id)
+
+    if is_stale is False:
+        logger.info(f"   ⏭️  Duplicate (< {REFRESH_AFTER_DAYS}d old) — skipping {keyword} / {data_type}")
         return False
+
+    if is_stale is True:
+        logger.info(f"   🔄 Stale (>= {REFRESH_AFTER_DAYS}d old) — refreshing {keyword} / {data_type}")
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE raw_source_data
+                SET content = %s, collected_at = NOW()
+                WHERE source_id = %s AND source_type = 'google_trends'
+            """, (
+                json.dumps(content_data),
+                source_id,
+            ))
+        conn.commit()
+        return True
 
     with conn.cursor() as cur:
         cur.execute("""
