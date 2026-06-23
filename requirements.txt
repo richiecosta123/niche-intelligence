@@ -6,3 +6,5 @@ youtube-transcript-api>=0.6.1
 google-api-python-client>=2.108.0
 pytrends
 pytrends
+pytesseract
+Pillow
