@@ -10,10 +10,10 @@ This README describes what is actually in this repository today, verified by rea
 
 - **One niche is actually populated with data: Exotic Car Rental (`niche_id = 1`).** A second niche, Chauffeur Services (`niche_id = 2`), has a config row and keyword notes but no evidence of scraped data.
 - **17 Python scrapers**, all runnable standalone from the repo root. All are individually functional (error handling, dedup, anti-detection delays); none have automated tests.
-- **One MCP server** (`mcp-server/`), a single `src/index.ts`, registering **46 tools**. Most are direct Postgres reads/writes; 11 spawn one of the Python scrapers as a subprocess; 11 are "brain" orchestration tools.
-- **14 "brain" modules** exist in `mcp-server/src/brains/`. **11 are wired into the MCP server** and reachable as tools (5 query the DB themselves and bundle real rows into their response; 6 just return a system prompt + instructions telling the calling Claude which `query_*`/`save_*` tools to use itself). **1 more (`market-strategist.ts`) is partially wired** — only its `saveDisruptionReport()` helper is imported; its own data-gathering tool is reimplemented inline in `index.ts` instead. **1 is only reachable through a separate, unrelated CLI script** (`run.ts`), not through the MCP server, and **1 is an explicit stub**. See [Brains](#brains) below for the exact breakdown.
+- **One MCP server** (`mcp-server/`), a single `src/index.ts`, registering **47 tools**. Most are direct Postgres reads/writes; 11 spawn one of the Python scrapers as a subprocess; 12 are "brain" orchestration tools.
+- **14 "brain" modules** exist in `mcp-server/src/brains/`. **12 are wired into the MCP server** and reachable as tools (6 query the DB themselves and bundle real rows into their response; 6 just return a system prompt + instructions telling the calling Claude which `query_*`/`save_*` tools to use itself). **1 more (`market-strategist.ts`) is partially wired** — only its `saveDisruptionReport()` helper is imported; its own data-gathering tool is reimplemented inline in `index.ts` instead. **1 is only reachable through a separate, unrelated CLI script** (`run.ts`), not through the MCP server. See [Brains](#brains) below for the exact breakdown.
 - **No brain calls an LLM.** `@anthropic-ai/sdk` is a declared dependency in `mcp-server/package.json` but is never imported or invoked anywhere in the codebase. Every brain tool just gathers rows from Postgres (or doesn't) and returns a system prompt + a `saveSchema`; the actual reasoning is done by whatever Claude session called the tool, which is then expected to call the matching `save_*` tool with its output.
-- **The database schema is in drift.** The only committed migration (`migrate.ts`) creates 18 tables. But `index.ts` and two brains (`apex-positioning.ts`, `client-intelligence.ts`) read and write **9 additional tables** — `authority_sources`, `association_intelligence`, `agency_benchmarks`, `hooks_library`, `stories_library`, `apex_positioning_briefs`, `client_intelligence_reports`, `financial_analysis`, `competitor_analysis` — that no committed script creates. These exist only in whatever live Neon database someone has set up by hand. **A fresh clone + `npm run migrate` will not have working tables for roughly a third of the 46 MCP tools.** Details in [Database](#database).
+- **The database schema is in drift.** The only committed migration (`migrate.ts`) creates 18 tables. But `index.ts` and two brains (`apex-positioning.ts`, `client-intelligence.ts`) read and write **9 additional tables** — `authority_sources`, `association_intelligence`, `agency_benchmarks`, `hooks_library`, `stories_library`, `apex_positioning_briefs`, `client_intelligence_reports`, `financial_analysis`, `competitor_analysis` — that no committed script creates. These exist only in whatever live Neon database someone has set up by hand. **A fresh clone + `npm run migrate` will not have working tables for roughly a third of the 47 MCP tools.** Details in [Database](#database).
 - Older docs in this repo — the previous `README.md`, `CHANGELOG.md`, `build-roadmap.md`, `STATUS_REPORT_v0_1_0.md`, `testing-checklist.md`, `PHASE_1_WEEK_2_COMPLETE.md` — describe a snapshot from ~May 2026 (v0.1–v0.3, 2 brains, 17 tables, single Reddit scraper). The code has moved well past that. See [Stale docs](#stale-docs-in-this-repo).
 
 ---
@@ -24,7 +24,7 @@ This README describes what is actually in this repository today, verified by rea
 2. **Data collection** happens by running a Python scraper directly from the repo root (e.g. `python3 reddit_browser_scraper.py --niche-id 1`), or by asking Claude (connected to the MCP server) to call one of the `run_*_scraper` tools, which spawns the identical script as a subprocess with a 5-minute timeout and returns its stdout/stderr.
 3. Most scrapers write into `raw_source_data`, tagged by `source_type` (`reddit`, `youtube`, `google_news`, `google_trends`, `trustpilot`, `yelp`, `forum_fastlane`, `forum_warrior`, `forum_ferrarichat`, `landing_page`, `newsletter_pending` / `newsletter` / `newsletter_failed`, `landing_page_url_candidate`). The Facebook ad scraper writes into `competitor_ad_data` instead. The Meta and Google ad-library scrapers update `agency_benchmarks.meta_ads` / `authority_sources.paid_amplification` directly.
 4. Two scrapers are two-stage pipelines: `magazine_discovery_scraper.py` finds candidate article URLs on trade-press sites and inserts them as `source_type='newsletter_pending'`; `email_intelligence_scraper.py` later visits those same URLs and flips each row to `'newsletter'` (success, with extracted body text) or `'newsletter_failed'`.
-5. Once raw data exists, Claude can call one of the 11 wired brain tools. Five of them (`extract_hooks`, `extract_offers`, `extract_stories`, `run_apex_positioning_brain`, `run_client_intelligence_brain`) query the DB themselves and hand back real rows plus a prompt. The other six (`competitive_intelligence`, `conversational_assistant`, `copywriter`, `financial_analyst`, `offer_designer`, `persona_architect`) don't query anything — they hand back a system prompt and an instruction telling the calling Claude which `query_*` tools to call itself first. Either way, there is no automatic save step: the calling Claude session does the actual analysis and is expected to call the matching `save_*` tool with the result.
+5. Once raw data exists, Claude can call one of the 12 wired brain tools. Six of them (`extract_hooks`, `extract_offers`, `extract_stories`, `run_apex_positioning_brain`, `run_client_intelligence_brain`, `run_research_analyst`) query the DB themselves and hand back real rows plus a prompt. The other six (`competitive_intelligence`, `conversational_assistant`, `copywriter`, `financial_analyst`, `offer_designer`, `persona_architect`) don't query anything — they hand back a system prompt and an instruction telling the calling Claude which `query_*` tools to call itself first. Either way, there is no automatic save step: the calling Claude session does the actual analysis and is expected to call the matching `save_*` tool with the result.
 6. Every output type also has a direct `save_*` tool (for manually-entered or web-search-derived intelligence) and a matching `query_*` tool to read it back.
 
 ---
@@ -63,15 +63,15 @@ niche-intelligence/
 │
 └── mcp-server/
     ├── package.json, tsconfig.json
-    ├── EXAMPLE_OUTPUT.md            # shows fabricated output for the research_analyst brain, which is actually a stub — do not trust this file
+    ├── EXAMPLE_OUTPUT.md            # shows fabricated output for an `npm run run-brain -- --dry-run` CLI that doesn't exist — research_analyst is real now, but invoked differently (run_research_analyst MCP tool, or run.ts); do not trust this file
     ├── build/                       # compiled JS from `npm run build` (gitignored)
     └── src/
-        ├── index.ts                 # the entire MCP server: all 46 tool definitions + handlers, one file
-        ├── run.ts                   # tiny separate CLI (`npx tsx src/run.ts <brain_name> --niche-id <id>`); only wires up research_analyst (stub) and success_story_hunter — not used by the MCP server
+        ├── index.ts                 # the entire MCP server: all 47 tool definitions + handlers, one file
+        ├── run.ts                   # tiny separate CLI (`npx tsx src/run.ts <brain_name> --niche-id <id>`); only wires up research_analyst and success_story_hunter — not used by the MCP server
         ├── test-tools.ts            # CLI for exercising MCP tools directly without an MCP client
         └── brains/
             ├── *.ts                 # 14 brain modules — see Brains section for which are reachable
-            └── prompts/*.md         # system-prompt text, loaded by 11 of the 14 brains
+            └── prompts/*.md         # system-prompt text, loaded by 12 of the 14 brains
 ```
 
 ---
@@ -249,7 +249,7 @@ npm run build && npm start    # compiled: tsc -> node build/index.js
 
 The server reads `NEON_DB_URL` from the repo-root `.env` (see [Environment variables](#environment-variables)) and connects with a single `pg.Pool`. To use it from Claude Desktop, point an MCP server entry at `node <repo>/mcp-server/build/index.js` (after `npm run build`) or `npx tsx <repo>/mcp-server/src/index.ts` in your `claude_desktop_config.json`.
 
-`npm run test-tools -- <tool_name> --flag value` exercises a tool directly without an MCP client, e.g. `npm run test-tools -- query_insights --niche-id 1`. Note: `test-tools.ts` has its own small hardcoded dispatcher predating most of the tool list — it only recognizes 6 tools (`query_raw_posts`, `query_insights`, `save_insight`, `save_persona`, `get_niche_config`, `query_personas`), not all 46. For anything else, call the tool through an actual MCP client (Claude Desktop) or add a case to `test-tools.ts`.
+`npm run test-tools -- <tool_name> --flag value` exercises a tool directly without an MCP client, e.g. `npm run test-tools -- query_insights --niche-id 1`. Note: `test-tools.ts` has its own small hardcoded dispatcher predating most of the tool list — it only recognizes 6 tools (`query_raw_posts`, `query_insights`, `save_insight`, `save_persona`, `get_niche_config`, `query_personas`), not all 47. For anything else, call the tool through an actual MCP client (Claude Desktop) or add a case to `test-tools.ts`.
 
 ### Tools — direct database read/write (24)
 
@@ -282,11 +282,11 @@ The server reads `NEON_DB_URL` from the repo-root `.env` (see [Environment varia
 
 \* required
 
-### Tools — brain orchestration (11)
+### Tools — brain orchestration (12)
 
 None of these call an LLM or save anything themselves — that's left to the calling Claude. There are two distinct shapes. See [Brains](#brains).
 
-**Self-querying — these hit the DB and bundle real rows into the response (5)**
+**Self-querying — these hit the DB and bundle real rows into the response (6)**
 
 | Tool | Parameters | What it does |
 |---|---|---|
@@ -295,6 +295,7 @@ None of these call an LLM or save anything themselves — that's left to the cal
 | `extract_stories` | `niche_id`* | Same pattern across ads, posts (reddit/youtube/google_news/trustpilot/forum), and all insight types; targets `save_success_story`. |
 | `run_apex_positioning_brain` | none | Gathers Apex's own scraped site content, all `agency_benchmarks`/`authority_sources`/`association_intelligence` rows, and up to 30 `insights` tagged with a consulting- or PE-firm tag (see [Tagging convention](#tagging-convention)); returns data + a 3-step instruction (browse consulting/PE sites and save findings first, then analyze, then save) + prompt; targets `save_apex_positioning_brief`. |
 | `run_client_intelligence_brain` | `niche_id`*, `client_name`, `city`, `report_type` (default state_of_market) | Gathers the latest Apex positioning brief plus a wide slice of niche intelligence (insights, personas, stories, hooks, offers, trends, competitor ads, disruption reports); returns data + prompt; targets `save_client_intelligence_report`. |
+| `run_research_analyst` | `niche_id`* | Pulls up to 100 unprocessed raw customer-voice posts (`reddit`/`youtube`/`trustpilot`/`yelp`/`newsletter`/`forum_*`), oldest-first, using the same `max_id_processed`-from-`research_jobs` cursor pattern as `query_raw_posts`; returns data + prompt for the calling Claude to extract evidence-based insights across 6 categories (pain_points, buying_triggers, objections, language_patterns, competitor_gaps, market_timing); targets `save_insight`. |
 
 **Instruction-only — these never touch the DB, they just hand back a system prompt + a to-do list of `query_*`/`save_*` tools for the calling Claude to use (6)**
 
@@ -350,10 +351,10 @@ The 6 brains wired in this pass (`competitive-intelligence.ts`, `conversational-
 | `financial-analyst.ts` | **Wired** | `financial_analyst` MCP tool. |
 | `offer-designer.ts` | **Wired** | `offer_designer` MCP tool. Targets the same `save_offer` tool as `offer-extractor.ts` — one designs new offers from scratch, the other extracts offers already visible in scraped data. |
 | `persona-architect.ts` | **Wired** | `persona_architect` MCP tool — notable because its prompt instructs the calling Claude to save personas one at a time rather than in a batch. |
-| `success-story-hunter.ts` | **Built, reachable only via `run.ts`** | `npx tsx mcp-server/src/run.ts success_story_hunter --niche-id <id>` — a standalone CLI separate from the 46 MCP tools above. Its `saveSchema` uses camelCase field names (`storyTitle`, `proofLinks`), inconsistent with `story-extractor.ts`'s snake_case for the same `save_success_story` tool. |
-| `research-analyst.ts` | **Stub** | `npx tsx mcp-server/src/run.ts research_analyst --niche-id <id>` returns `{status: 'stub — not yet implemented'}` and nothing else. Not in the MCP server. |
+| `success-story-hunter.ts` | **Built, reachable only via `run.ts`** | `npx tsx mcp-server/src/run.ts success_story_hunter --niche-id <id>` — a standalone CLI separate from the 47 MCP tools above. Its `saveSchema` uses camelCase field names (`storyTitle`, `proofLinks`), inconsistent with `story-extractor.ts`'s snake_case for the same `save_success_story` tool. |
+| `research-analyst.ts` | **Wired** | `run_research_analyst` MCP tool. Pulls up to 100 unprocessed raw customer-voice posts (reddit/youtube/trustpilot/yelp/newsletter/forum_*), tracking progress the same way as `query_raw_posts` (cursor = highest `max_id_processed` from a completed `research_jobs` row, falling back to 0); returns data + prompt for the calling Claude to extract insights across 6 categories and call `save_insight`. Also reachable via `npx tsx mcp-server/src/run.ts research_analyst --niche-id <id>`, which opens its own short-lived `pg.Pool` since `run.ts` doesn't provide one. |
 
-Of the 14 brains, 11 load a system prompt from `mcp-server/src/brains/prompts/*.md`. `apex-positioning.ts`, `client-intelligence.ts`, and the stub `research-analyst.ts` do not.
+Of the 14 brains, 12 load a system prompt from `mcp-server/src/brains/prompts/*.md`. Only `apex-positioning.ts` and `client-intelligence.ts` do not.
 
 ---
 
@@ -386,7 +387,7 @@ There is no automated test suite (no Jest/pytest config, no CI). What actually e
 These files describe earlier states of the project and contain claims that no longer match the code. Treat them as historical record, not current documentation:
 
 - **`CHANGELOG.md`, `build-roadmap.md`, `STATUS_REPORT_v0_1_0.md`, `PHASE_1_WEEK_2_COMPLETE.md`** — describe v0.1–v0.3, 2 working brains, a single Reddit scraper, and 17 tables. All superseded by what's described above.
-- **`mcp-server/EXAMPLE_OUTPUT.md`** — shows fabricated sample output for `research_analyst`, which is an explicit stub that returns nothing of the kind. It also references `npm run run-brain`, a script that does not exist in `mcp-server/package.json`.
+- **`mcp-server/EXAMPLE_OUTPUT.md`** — shows fabricated sample output for an `npm run run-brain -- --dry-run` CLI (a script that does not exist in `mcp-server/package.json`) that calls Claude internally and prints saved insights. `research_analyst` is now a real, wired brain (`run_research_analyst` MCP tool), but like every other brain in this codebase it returns a data + prompt package for the calling Claude to act on — it doesn't call Claude itself, so this file's depiction never matched and still doesn't.
 - **`SCHEMA.md`** — documents a "Hook-Story-Offer Framework" schema (the 9 missing tables described in [Database](#database)) that was never turned into a committed migration; useful as a *description of intent* for those tables' columns, not as proof they're set up correctly.
 - **`testing-checklist.md`** — a template, not a completed checklist.
 - **`brain-prompts.md`** — this one does check out: it's the source material that the actual `mcp-server/src/brains/prompts/*.md` files were built from, and matches the prompts loaded in code.

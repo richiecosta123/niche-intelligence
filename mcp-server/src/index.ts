@@ -13,6 +13,7 @@ import { runStoryExtractor } from './brains/story-extractor.js';
 import { runOfferExtractor } from './brains/offer-extractor.js';
 import { runApexPositioningBrain } from './brains/apex-positioning.js';
 import { runClientIntelligenceBrain } from './brains/client-intelligence.js';
+import { runResearchAnalystBrain } from './brains/research-analyst.js';
 import { competitiveIntelligenceTool } from './brains/competitive-intelligence.js';
 import { conversationalAssistantTool } from './brains/conversational-assistant.js';
 import { copywriterTool } from './brains/copywriter.js';
@@ -820,6 +821,23 @@ const TOOLS = [
           type: 'string',
           description: 'Report type: state_of_market | opportunity_brief | competitive_landscape (default: state_of_market)',
         },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
+    name: 'run_research_analyst',
+    description:
+      'Research Analyst Brain: gathers up to 100 unprocessed raw customer-voice posts ' +
+      '(reddit, youtube, trustpilot, yelp, newsletter, forum_*) for a niche, picking up where the ' +
+      'last completed research_jobs run left off via max_id_processed. ' +
+      'Returns the posts plus a prompt instructing the calling Claude to extract evidence-based insights ' +
+      'across 6 categories (pain_points, buying_triggers, objections, language_patterns, competitor_gaps, ' +
+      'market_timing). Save each qualifying insight via save_insight.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'ID of the niche to analyze raw customer-voice data for' },
       },
       required: ['niche_id'],
     },
@@ -1637,6 +1655,10 @@ async function runClientIntelligence(a: Args) {
   );
 }
 
+async function runResearchAnalyst(a: Args) {
+  return runResearchAnalystBrain(pool, a.niche_id as number);
+}
+
 async function runCompetitiveIntelligence(a: Args) {
   return competitiveIntelligenceTool.handler({ nicheId: a.niche_id as number });
 }
@@ -1786,6 +1808,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'save_agency_benchmark':           result = await saveAgencyBenchmark(a);           break;
       case 'run_apex_positioning_brain':      result = await runApexPositioning();             break;
       case 'run_client_intelligence_brain':   result = await runClientIntelligence(a);         break;
+      case 'run_research_analyst':            result = await runResearchAnalyst(a);            break;
       case 'competitive_intelligence':        result = await runCompetitiveIntelligence(a);    break;
       case 'conversational_assistant':        result = await runConversationalAssistant(a);    break;
       case 'copywriter':                      result = await runCopywriter(a);                 break;
