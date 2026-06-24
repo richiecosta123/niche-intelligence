@@ -11,6 +11,7 @@ const SYSTEM_PROMPT = readFileSync(
 );
 
 const RAW_POST_LIMIT = 100;
+const BRAIN_NAME = 'research_analyst';
 
 // Raw customer-voice source types this brain analyzes — excludes landing pages,
 // ad data, and other non-voice-of-customer rows in raw_source_data.
@@ -48,6 +49,45 @@ async function gatherUnprocessedPosts(pool: Pool, nicheId: number) {
     [nicheId, sinceId, CUSTOMER_VOICE_SOURCE_TYPES, RAW_POST_LIMIT]
   );
   return { posts: rows, sinceId };
+}
+
+// research_jobs has no unique constraint on (niche_id, brain_name), so this is
+// a manual select-then-insert/update rather than a native ON CONFLICT upsert.
+// Keeps exactly one 'completed' row per (niche_id, brain_name) — the same row
+// the since_id query above reads MAX(max_id_processed) from — so the cursor
+// actually advances between runs instead of always starting at 0.
+async function writeBackProgress(pool: Pool, nicheId: number, batchMaxId: number | null) {
+  if (batchMaxId == null) return; // no posts in this batch — nothing to advance
+
+  try {
+    const { rows } = await pool.query<{ id: number; max_id_processed: number | null }>(
+      `SELECT id, (result->>'max_id_processed')::int AS max_id_processed
+       FROM research_jobs
+       WHERE niche_id = $1 AND brain_name = $2 AND status = 'completed'
+       ORDER BY id DESC
+       LIMIT 1`,
+      [nicheId, BRAIN_NAME]
+    );
+    const existing = rows[0];
+
+    if (!existing) {
+      await pool.query(
+        `INSERT INTO research_jobs
+           (niche_id, job_type, status, brain_name, result, started_at, completed_at)
+         VALUES ($1, $2, 'completed', $2, $3::json, NOW(), NOW())`,
+        [nicheId, BRAIN_NAME, JSON.stringify({ max_id_processed: batchMaxId })]
+      );
+    } else if (existing.max_id_processed == null || batchMaxId > existing.max_id_processed) {
+      await pool.query(
+        `UPDATE research_jobs
+         SET result = $1::json, completed_at = NOW(), updated_at = NOW()
+         WHERE id = $2`,
+        [JSON.stringify({ max_id_processed: batchMaxId }), existing.id]
+      );
+    }
+  } catch (err) {
+    console.error('research_analyst: failed to write back research_jobs progress', err);
+  }
 }
 
 // ─── Prompt builder ───────────────────────────────────────────────────────────
@@ -92,6 +132,9 @@ function tallyBySourceType(posts: RawPost[]): Record<string, number> {
 
 export async function runResearchAnalystBrain(pool: Pool, nicheId: number) {
   const { posts, sinceId } = await gatherUnprocessedPosts(pool, nicheId);
+  const maxIdInBatch = posts.length ? Math.max(...posts.map((p) => p.id)) : null;
+
+  await writeBackProgress(pool, nicheId, maxIdInBatch);
 
   const sourceUrlMap: Record<number, string> = {};
   for (const p of posts) {
@@ -109,7 +152,7 @@ export async function runResearchAnalystBrain(pool: Pool, nicheId: number) {
     },
     progress: {
       since_id: sinceId,
-      max_id_in_batch: posts.length ? Math.max(...posts.map((p) => p.id)) : sinceId,
+      max_id_in_batch: maxIdInBatch ?? sinceId,
     },
     sourceUrlMap,
     instruction:
