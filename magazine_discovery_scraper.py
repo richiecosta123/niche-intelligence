@@ -16,7 +16,7 @@ import random
 import re
 import sys
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import psycopg2
 from dotenv import load_dotenv
@@ -49,6 +49,7 @@ MAGAZINES = [
         'url': 'https://www.autorentalnews.com/',
         'method': 'top_links',
         'section': 'homepage',
+        'source_category': 'magazine',
         'max_items': 8,
     },
     {
@@ -56,7 +57,73 @@ MAGAZINES = [
         'url': 'https://www.luxurydaily.com/category/sectors/automotive-industry-sectors/',
         'method': 'dated_listing',
         'section': 'automotive-industry-sectors',
+        'source_category': 'magazine',
         'max_age_days': 7,
+    },
+    # ── Consulting firms ────────────────────────────────────────────────────────
+    {
+        'name': 'BCG Automotive',
+        'url': 'https://www.bcg.com/industries/automotive/insights',
+        'method': 'generic_links',
+        'section': 'automotive-insights',
+        'source_category': 'consulting',
+        'link_path_contains': '/publications/',   # BCG article URL pattern
+        'max_items': 8,
+    },
+    {
+        'name': 'Bain & Company Automotive',
+        'url': 'https://www.bain.com/industry-expertise/automotive/',
+        'method': 'generic_links',
+        'section': 'automotive',
+        'source_category': 'consulting',
+        'link_path_contains': '/insights/',       # Bain & Co article URL pattern
+        'max_items': 8,
+    },
+    {
+        'name': 'Deloitte Automotive',
+        'url': 'https://www.deloitte.com/us/en/industries/automotive.html',
+        'method': 'generic_links',
+        'section': 'automotive',
+        'source_category': 'consulting',
+        'link_path_contains': '/insights/',       # Deloitte article URL pattern
+        'max_items': 8,
+    },
+    # ── PE firms ────────────────────────────────────────────────────────────────
+    {
+        'name': 'Bain Capital',
+        'url': 'https://www.baincapital.com/news',
+        'method': 'generic_links',
+        'section': 'news',
+        'source_category': 'pe_firm',
+        'link_path_contains': '/news/',           # Articles at /news/article-slug
+        'max_items': 8,
+    },
+    {
+        'name': 'KKR',
+        'url': 'https://www.kkr.com/insights',
+        'method': 'generic_links',
+        'section': 'insights',
+        'source_category': 'pe_firm',
+        'link_path_contains': '/insights/',       # Articles at /insights/article-slug
+        'max_items': 8,
+    },
+    {
+        'name': 'Blackstone',
+        'url': 'https://www.blackstone.com/insights',
+        'method': 'generic_links',
+        'section': 'insights',
+        'source_category': 'pe_firm',
+        'link_path_contains': '/insights/',       # Articles at /insights/article-slug
+        'max_items': 8,
+    },
+    {
+        'name': 'Apollo',
+        'url': 'https://www.apollo.com/insights',
+        'method': 'generic_links',
+        'section': 'insights',
+        'source_category': 'pe_firm',
+        'link_path_contains': '/insights',        # Covers /insights/ and /insights-news/
+        'max_items': 8,
     },
 ]
 
@@ -80,11 +147,12 @@ def get_existing_urls(conn, niche_id: int) -> set[str]:
         return {normalize_url(r[0]).rstrip('/') for r in cur.fetchall() if r[0]}
 
 
-def save_pending(conn, niche_id: int, url: str, title: str, magazine_name: str, section: str):
+def save_pending(conn, niche_id: int, url: str, title: str, magazine_name: str, section: str, source_category: str = 'magazine'):
     metrics = {
         'magazine_name': magazine_name,
         'discovery_method': 'magazine_scrape',
         'section': section,
+        'source_category': source_category,
         'discovered_at': datetime.now(timezone.utc).isoformat(),
     }
     with conn.cursor() as cur:
@@ -188,6 +256,69 @@ async def extract_dated_listing(page, base_url: str, max_age_days: int) -> list[
     return results
 
 
+async def extract_generic_links(
+    page, base_url: str, max_items: int, link_path_contains: str | None = None
+) -> list[dict]:
+    """Generic link extractor for JS-heavy consulting and PE-firm insight pages.
+
+    Finds <a> tags on the same domain whose path is deeper than the source/category
+    page itself and whose visible text reads like a real article headline.
+    `link_path_contains` (e.g. '/insights/' or '/publications/') is a substring that
+    must appear in the URL path — use this to keep article links and discard global nav.
+    Relies on networkidle + 2 s settle already having been applied before this call."""
+    base_parsed = urlparse(normalize_url(base_url))
+    base_domain = base_parsed.netloc
+    base_path_norm = base_parsed.path.rstrip('/')
+
+    seen_order: list[str] = []
+    candidates: dict[str, list[str]] = {}
+
+    els = await page.query_selector_all('a[href]')
+    for el in els:
+        href = (await el.get_attribute('href') or '').strip()
+        if not href or href.startswith('#') or href.startswith('mailto:') or href.startswith('tel:'):
+            continue
+
+        abs_url = normalize_url(urljoin(base_url, href)).rstrip('/')
+        parsed = urlparse(abs_url)
+
+        # Same domain only
+        if parsed.netloc != base_domain:
+            continue
+
+        # Skip the source/category page itself
+        if parsed.path.rstrip('/') == base_path_norm:
+            continue
+
+        # Require at least 2 non-empty path segments (e.g. /insights/article-slug)
+        path_depth = len([p for p in parsed.path.split('/') if p])
+        if path_depth < 2:
+            continue
+
+        # Optional path substring filter — strips global nav/social/footer links
+        if link_path_contains and link_path_contains not in parsed.path:
+            continue
+
+        text = await safe_text(el)
+        if abs_url not in candidates:
+            candidates[abs_url] = []
+            seen_order.append(abs_url)
+        if text:
+            candidates[abs_url].append(text)
+
+    results: list[dict] = []
+    for url in seen_order:
+        headline_texts = [t for t in candidates[url] if is_real_headline(t)]
+        if not headline_texts:
+            continue
+        title = min(headline_texts, key=len)
+        results.append({'url': url, 'title': title, 'date': None})
+        if len(results) >= max_items:
+            break
+
+    return results
+
+
 # ─── Main scrape loop ─────────────────────────────────────────────────────────
 
 async def scrape(niche_id: int, headless: bool, test: bool):
@@ -224,6 +355,11 @@ async def scrape(niche_id: int, headless: bool, test: bool):
 
                 if magazine['method'] == 'top_links':
                     candidates = await extract_top_links(page, magazine['url'], magazine['max_items'])
+                elif magazine['method'] == 'generic_links':
+                    candidates = await extract_generic_links(
+                        page, magazine['url'], magazine['max_items'],
+                        magazine.get('link_path_contains'),
+                    )
                 else:
                     candidates = await extract_dated_listing(page, magazine['url'], magazine['max_age_days'])
 
@@ -246,7 +382,7 @@ async def scrape(niche_id: int, headless: bool, test: bool):
                     if test:
                         logger.info(f"  🆕 [TEST] {title[:70]!r}{date_suffix} | {url}")
                     else:
-                        save_pending(conn, niche_id, url, title, magazine['name'], magazine['section'])
+                        save_pending(conn, niche_id, url, title, magazine['name'], magazine['section'], magazine.get('source_category', 'magazine'))
                         logger.info(f"  ✅ Saved: {title[:60]!r}{date_suffix} | {url}")
 
             except PlaywrightTimeoutError:

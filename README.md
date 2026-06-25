@@ -9,8 +9,8 @@ This README describes what is actually in this repository today, verified by rea
 ## Current status
 
 - **One niche is actually populated with data: Exotic Car Rental (`niche_id = 1`).** A second niche, Chauffeur Services (`niche_id = 2`), has a config row and keyword notes but no evidence of scraped data.
-- **17 Python scrapers**, all runnable standalone from the repo root. All are individually functional (error handling, dedup, anti-detection delays); none have automated tests.
-- **One MCP server** (`mcp-server/`), a single `src/index.ts`, registering **47 tools**. Most are direct Postgres reads/writes; 11 spawn one of the Python scrapers as a subprocess; 12 are "brain" orchestration tools.
+- **18 Python scrapers**, all runnable standalone from the repo root. All are individually functional (error handling, dedup, anti-detection delays); none have automated tests.
+- **One MCP server** (`mcp-server/`), a single `src/index.ts`, registering **48 tools**. Most are direct Postgres reads/writes; 12 spawn one of the Python scrapers as a subprocess; 12 are "brain" orchestration tools.
 - **14 "brain" modules** exist in `mcp-server/src/brains/`. **12 are wired into the MCP server** and reachable as tools (6 query the DB themselves and bundle real rows into their response; 6 just return a system prompt + instructions telling the calling Claude which `query_*`/`save_*` tools to use itself). **1 more (`market-strategist.ts`) is partially wired** — only its `saveDisruptionReport()` helper is imported; its own data-gathering tool is reimplemented inline in `index.ts` instead. **1 is only reachable through a separate, unrelated CLI script** (`run.ts`), not through the MCP server. See [Brains](#brains) below for the exact breakdown.
 - **No brain calls an LLM.** `@anthropic-ai/sdk` is a declared dependency in `mcp-server/package.json` but is never imported or invoked anywhere in the codebase. Every brain tool just gathers rows from Postgres (or doesn't) and returns a system prompt + a `saveSchema`; the actual reasoning is done by whatever Claude session called the tool, which is then expected to call the matching `save_*` tool with its output.
 - **The database schema is in drift.** The only committed migration (`migrate.ts`) creates 18 tables. But `index.ts` and two brains (`apex-positioning.ts`, `client-intelligence.ts`) read and write **9 additional tables** — `authority_sources`, `association_intelligence`, `agency_benchmarks`, `hooks_library`, `stories_library`, `apex_positioning_briefs`, `client_intelligence_reports`, `financial_analysis`, `competitor_analysis` — that no committed script creates. These exist only in whatever live Neon database someone has set up by hand. **A fresh clone + `npm run migrate` will not have working tables for roughly a third of the 47 MCP tools.** Details in [Database](#database).
@@ -66,7 +66,7 @@ niche-intelligence/
     ├── EXAMPLE_OUTPUT.md            # shows fabricated output for an `npm run run-brain -- --dry-run` CLI that doesn't exist — research_analyst is real now, but invoked differently (run_research_analyst MCP tool, or run.ts); do not trust this file
     ├── build/                       # compiled JS from `npm run build` (gitignored)
     └── src/
-        ├── index.ts                 # the entire MCP server: all 47 tool definitions + handlers, one file
+        ├── index.ts                 # the entire MCP server: all 48 tool definitions + handlers, one file
         ├── run.ts                   # tiny separate CLI (`npx tsx src/run.ts <brain_name> --niche-id <id>`); only wires up research_analyst and success_story_hunter — not used by the MCP server
         ├── test-tools.ts            # CLI for exercising MCP tools directly without an MCP client
         └── brains/
@@ -85,6 +85,8 @@ Actually read by code:
 | `NEON_DB_URL` | every TS entry point and every Python scraper | Postgres (Neon) connection string. The only variable required to run anything. |
 | `YOUTUBE_API_KEY` | `youtube_scraper.py` | YouTube Data API v3, for search/video metadata. Transcripts come from `yt-dlp`, not this key. |
 | `ANTHROPIC_API_KEY` | loaded via `dotenv` in `mcp-skill-template.ts` and the MCP server's env setup | **Never actually used** — no code anywhere calls the Anthropic SDK or any Claude API endpoint. Safe to leave unset. |
+| `GMAIL_CREDENTIALS_PATH` | `gmail_scraper.py` | Path to a `credentials.json` file downloaded from Google Cloud Console (OAuth2 desktop app client). Required for `gmail_scraper.py` / `run_gmail_scraper` MCP tool. |
+| `GMAIL_TOKEN_PATH` | `gmail_scraper.py` | Where to cache the OAuth2 token after first authorisation. Defaults to `~/.gmail_token.json` if not set. |
 
 Declared in `.env.example` but referenced by no code in the repo: `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT` (Reddit scraping is done by driving a real browser with Playwright, not the Reddit API), `ADBEAT_API_KEY`, `GOOGLE_SEARCH_CONSOLE_CLIENT_ID`, `GOOGLE_SEARCH_CONSOLE_CLIENT_SECRET`.
 
@@ -215,9 +217,16 @@ All live at the repo root. All connect to Postgres with `psycopg2`/`NEON_DB_URL`
 - **Writes to:** `raw_source_data` (`source_type='landing_page'`); `ON CONFLICT DO NOTHING` on `source_url`. Exposes `normalize_url()` and `random_delay()`, imported by `magazine_discovery_scraper.py`.
 
 #### `magazine_discovery_scraper.py`
-- **Does:** Visits 2 hardcoded trade-press pages (Auto Rental News homepage, Luxury Daily automotive section), extracts article links/headlines, filters out nav junk, and seeds new ones for later content scraping.
+- **Does:** Visits 9 configured source pages — 2 trade magazines (Auto Rental News homepage, Luxury Daily automotive category) + 3 consulting firms (BCG, Bain & Company, Deloitte automotive pages) + 4 PE firms (Bain Capital, KKR, Blackstone, Apollo insights/news pages) — extracts article links/headlines, and seeds new ones for later content scraping. Each source has a `link_path_contains` filter (e.g. `/publications/` for BCG, `/news/` for Bain Capital) that prevents global nav links from being collected. `source_category` (`'magazine'`, `'consulting'`, or `'pe_firm'`) is stored in `engagement_metrics`.
 - **Run:** `python3 magazine_discovery_scraper.py --niche-id 1` (`--test` to print discoveries without writing)
 - **Flags:** `--niche-id` (int, required), `--headless` (flag), `--test` (flag)
+- **Writes to:** `raw_source_data` (`source_type='newsletter_pending'`); deduped against any existing `source_url` for the niche regardless of source type.
+
+#### `gmail_scraper.py`
+- **Does:** Authenticates to Gmail via OAuth2, searches the inbox for emails matching a configurable query (default: `label:apex-intel newer_than:7d`), extracts article URLs from each email body (plaintext preferred, HTML-stripped fallback), filters out tracking/unsubscribe/social links, and seeds new URLs as `source_type='newsletter_pending'` with `engagement_metrics: {sender, subject, date, discovery_method: 'gmail_scraper'}`. On first run with no cached token, opens a browser tab to complete OAuth authorisation; token is saved to `GMAIL_TOKEN_PATH` for all subsequent runs. Uses the Gmail REST API (not IMAP).
+- **Run:** `python3 gmail_scraper.py --niche-id 1` (`--test` to extract without writing to DB)
+- **Flags:** `--niche-id` (int, required), `--query` (str, default `"label:apex-intel newer_than:7d"`), `--limit` (int, default 50), `--test` (flag)
+- **Prerequisites:** `GMAIL_CREDENTIALS_PATH` set in `.env` pointing to a `credentials.json` downloaded from Google Cloud Console (OAuth2 Desktop App client with Gmail API enabled).
 - **Writes to:** `raw_source_data` (`source_type='newsletter_pending'`); deduped against any existing `source_url` for the niche regardless of source type.
 
 #### `email_intelligence_scraper.py`
@@ -323,6 +332,7 @@ Each spawns `python3 <script>.py ...` from the repo root with a 5-minute timeout
 | `seed_newsletter_urls` | *(listed above with the DB tools — it's a direct insert, not a scraper spawn)* | — |
 | `run_email_intelligence_scraper` | `niche_id`*, `limit` (default 20), `batch` (default 5), `headless` (default false) | `email_intelligence_scraper.py --niche-id {id} --limit {limit} --batch {batch} [--headless]` |
 | `run_magazine_discovery_scraper` | `niche_id`*, `headless` (default false) | `magazine_discovery_scraper.py --niche-id {id} [--headless]` |
+| `run_gmail_scraper` | `niche_id`*, `query` (default `"label:apex-intel newer_than:7d"`), `limit` (default 50) | `gmail_scraper.py --niche-id {id} --limit {limit} [--query {q}]` |
 | `run_meta_ads_scraper` | `type` (default all), `limit` (default 50) | `meta_ads_scraper.py --type {type} --limit {limit}` |
 | `run_google_ads_scraper` | `type` (default all), `limit` (default 50) | `google_ads_scraper.py --type {type} --limit {limit}` |
 | `browse_page` | `url`*, `wait_for` | `browser_tool.py --url {url} [--wait-for {selector}]` |
@@ -363,7 +373,7 @@ Of the 14 brains, 12 load a system prompt from `mcp-server/src/brains/prompts/*.
 This is the recurring flow `run_apex_positioning_brain` is built around — there's no scheduler or cron job that runs it; it's intended to be triggered manually (e.g. weekly) by asking Claude to run it.
 
 1. **Call `run_apex_positioning_brain`.** It queries Apex's own scraped pages, `agency_benchmarks`, `authority_sources`, `association_intelligence`, and up to 30 `insights` rows already tagged as consulting/PE intelligence (see [Tagging convention](#tagging-convention)), and returns all of that plus a 3-step instruction.
-2. **Step 1 of that instruction — gather fresh intelligence first.** The calling Claude is told to `browse_page` a fixed list of consulting-firm and PE-firm sites (BCG, Bain & Company, Deloitte automotive pages; Bain Capital, KKR, Blackstone, Apollo insights/news pages — McKinsey is sourced from Gmail under `label:apex-intel` instead of a URL) and `save_insight` anything relevant, tagged per the convention above. This is a manual step performed by whichever Claude session is running the brain that turn — there's no scraper or automation for these specific sites/sources.
+2. **Step 1 of that instruction — gather fresh intelligence first.** The calling Claude is told to browse consulting-firm and PE-firm sites and `save_insight` anything relevant, tagged per the convention above. `run_magazine_discovery_scraper` now automates the URL-discovery half of this for BCG, Bain & Company, Deloitte, Bain Capital, KKR, Blackstone, and Apollo — it seeds their insight/publication pages as `newsletter_pending` for `run_email_intelligence_scraper` to extract. McKinsey is still sourced from Gmail via `run_gmail_scraper` (label `apex-intel`) rather than a URL. The analysis and `save_insight` step remains a manual step performed by whichever Claude session is running the brain.
 3. **Step 2 — analyze.** Using agency benchmarks, authority sources, and the consulting+PE `research_intelligence` (now including whatever was just saved in step 1, since `gatherSources()` re-queries `insights` at call time), the calling Claude identifies positioning strengths, gaps, and opportunities for Apex — explicitly treating consulting signals ("what the market is doing") and PE signals ("where smart money thinks the market is going") as distinct.
 4. **Step 3 — save.** The result is saved via `save_apex_positioning_brief`, becoming the latest row in `apex_positioning_briefs` — which is exactly what `run_client_intelligence_brain` later pulls as its "style guide" when generating a client report (see `client-intelligence.ts`).
 

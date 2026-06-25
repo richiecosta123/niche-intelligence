@@ -674,6 +674,28 @@ const TOOLS = [
     },
   },
   {
+    name: 'run_gmail_scraper',
+    description:
+      'Spawn the Gmail scraper to search the inbox for newsletter emails matching a query, ' +
+      'extract article URLs from each email body, and seed them as newsletter_pending in ' +
+      'raw_source_data. Requires GMAIL_CREDENTIALS_PATH set in .env pointing to a ' +
+      'credentials.json downloaded from Google Cloud Console. On first run, opens a browser ' +
+      'tab for OAuth authorisation and saves a token to GMAIL_TOKEN_PATH for future runs. ' +
+      'Timeout: 5 minutes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        niche_id: { type: 'number', description: 'Niche ID to tag newsletter URLs for' },
+        query: {
+          type: 'string',
+          description: 'Gmail search query (default: "label:apex-intel newer_than:7d")',
+        },
+        limit: { type: 'number', description: 'Max emails to process (default: 50)' },
+      },
+      required: ['niche_id'],
+    },
+  },
+  {
     name: 'run_meta_ads_scraper',
     description:
       'Spawn the Meta Ads scraper to search Facebook Ad Library for agency_benchmarks and ' +
@@ -1547,6 +1569,15 @@ async function runMagazineDiscoveryScraper(a: Args): Promise<ScriptResult> {
   return spawnScript('magazine_discovery_scraper.py', args);
 }
 
+async function runGmailScraper(a: Args): Promise<ScriptResult> {
+  const args = [
+    '--niche-id', String(a.niche_id),
+    '--limit',    String((a.limit as number | undefined) ?? 50),
+  ];
+  if (a.query) args.push('--query', a.query as string);
+  return spawnScript('gmail_scraper.py', args);
+}
+
 async function runMetaAdsScraper(a: Args): Promise<ScriptResult> {
   return spawnScript('meta_ads_scraper.py', [
     '--type',  (a.type  as string | undefined) ?? 'all',
@@ -1800,6 +1831,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'seed_newsletter_urls':        result = await seedNewsletterUrls(a);       break;
       case 'run_email_intelligence_scraper': result = await runEmailIntelligenceScraper(a); break;
       case 'run_magazine_discovery_scraper': result = await runMagazineDiscoveryScraper(a); break;
+      case 'run_gmail_scraper':              result = await runGmailScraper(a);              break;
       case 'run_meta_ads_scraper':        result = await runMetaAdsScraper(a);        break;
       case 'run_google_ads_scraper':      result = await runGoogleAdsScraper(a);      break;
       case 'browse_page':                 result = await browsePage(a);               break;
