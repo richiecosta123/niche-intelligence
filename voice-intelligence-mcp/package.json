@@ -1,0 +1,19 @@
+{
+  "name": "voice-intelligence-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for writer voice capture, storage, and comparison",
+  "type": "module",
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.0.0"
+  }
+}
